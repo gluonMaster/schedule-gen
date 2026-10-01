@@ -124,6 +124,9 @@ def build_schedule_structure(activities, time_interval=5):
 
             interval = {
                 "id": act_id,
+                "block_id": details.get('block_id', str(act_id) if lesson_type != 'group' else ''),
+                "source_layer": details.get('source_layer', 'individual' if lesson_type != 'group' else 'base'),
+                "block_metadata": details.get('block_metadata', {}),
                 "start": start,
                 "end": end,
                 "teacher": details['teacher'],
@@ -134,6 +137,7 @@ def build_schedule_structure(activities, time_interval=5):
                 "color": _resolve_interval_color(details, lesson_type),
                 "lesson_type": lesson_type,
                 "trial_dates": list(trial_dates) if isinstance(trial_dates, list) else [],
+                "rental_dates": list(details.get('rental_dates', [])) if lesson_type == 'rental' else [],
                 # ИСПРАВЛЕНИЕ: Добавляем поля day и building для JavaScript
                 "day": day,
                 "building": building
@@ -212,6 +216,7 @@ def build_schedule_structure(activities, time_interval=5):
             buildings[building]['_grid'] = grid
 
         logger.info(f"Структура расписания сформирована для {len(buildings)} зданий")
+        buildings['_sync_metadata'] = getattr(activities, 'sync_metadata', None)
         return buildings
     
     except Exception as e:

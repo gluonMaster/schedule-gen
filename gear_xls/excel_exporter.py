@@ -17,6 +17,10 @@ from openpyxl.styles import PatternFill, Alignment, Border, Side, Font
 from openpyxl.utils.dataframe import dataframe_to_rows
 from gear_xls.day_constants import TRIAL_ONLY_DAYS, WEB_EDITOR_DAY_SET
 from gear_xls.lesson_type_utils import validate_rental_dates
+from gear_xls.schedule_exchange import (
+    RECORD_COLUMNS, ScheduleExchangeError, normalize_exchange_record,
+    check_unique_block_ids, normalize_sync_metadata, write_sync_metadata,
+)
 
 # Настройка логирования
 logging.basicConfig(
@@ -37,9 +41,15 @@ def validate_schedule_data_for_export(schedule_data):
     if not isinstance(schedule_data, list):
         raise ExcelExportValidationError("Schedule data must be a list")
 
+    normalized = []
     for index, activity in enumerate(schedule_data):
         if not isinstance(activity, dict):
             raise ExcelExportValidationError(f"Schedule row {index} must be an object")
+        try:
+            activity = normalize_exchange_record(activity)
+            normalized.append(activity)
+        except ScheduleExchangeError as exc:
+            raise ExcelExportValidationError(f"Schedule row {index}: {exc}") from exc
 
         day = str(activity.get("day") or "").strip()
         lesson_type = str(activity.get("lesson_type") or "group").strip() or "group"
@@ -63,8 +73,12 @@ def validate_schedule_data_for_export(schedule_data):
                 "Sunday is allowed only for trial lessons",
                 code="SUNDAY_REGULAR_FORBIDDEN",
             )
+    try:
+        check_unique_block_ids(normalized)
+    except ScheduleExchangeError as exc:
+        raise ExcelExportValidationError(str(exc)) from exc
 
-def create_excel_from_html_data(schedule_data, output_file=None):
+def create_excel_from_html_data(schedule_data, output_file=None, sync_metadata=None):
     """
     Создает Excel-файл на основе данных расписания из HTML-версии.
     
@@ -80,6 +94,8 @@ def create_excel_from_html_data(schedule_data, output_file=None):
         logger.error("Нет данных для экспорта в Excel")
         return None
     validate_schedule_data_for_export(schedule_data)
+    schedule_data = [normalize_exchange_record(row) for row in schedule_data]
+    sync_metadata = normalize_sync_metadata(sync_metadata)
     
     # Если имя выходного файла не указано, создаем имя по умолчанию
     if not output_file:
@@ -113,7 +129,7 @@ def create_excel_from_html_data(schedule_data, output_file=None):
             "Продолжительность",
             "Тип занятия",
             "Даты (JSON)",
-        ]
+        ] + list(RECORD_COLUMNS)
         
         for col_idx, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col_idx)
@@ -219,6 +235,14 @@ def create_excel_from_html_data(schedule_data, output_file=None):
 
             ws.cell(row=row_idx, column=10).value = lesson_type
             ws.cell(row=row_idx, column=11).value = trial_dates_json
+            service_values = [
+                activity['block_id'],
+                json.dumps(activity['rental_dates'], ensure_ascii=False) if lesson_type == 'rental' else '',
+                activity['source_layer'], activity.get('color', ''),
+                json.dumps(activity['block_metadata'], ensure_ascii=False),
+            ]
+            for column, value in enumerate(service_values, 12):
+                ws.cell(row=row_idx, column=column, value=value).number_format = '@'
             
             # Применяем стили к ячейкам
             for col_idx in range(1, len(headers) + 1):
@@ -245,6 +269,7 @@ def create_excel_from_html_data(schedule_data, output_file=None):
             ws.column_dimensions[column].width = adjusted_width
         
         # Сохраняем файл
+        write_sync_metadata(wb, sync_metadata)
         wb.save(output_file)
         logger.info(f"Excel-файл успешно создан: {output_file}")
         
@@ -256,7 +281,7 @@ def create_excel_from_html_data(schedule_data, output_file=None):
         traceback.print_exc()
         return None
 
-def process_schedule_export_request(request_data, output_dir="excel_exports"):
+def process_schedule_export_request(request_data, output_dir="excel_exports", sync_metadata=None):
     """
     Обрабатывает запрос на экспорт расписания в Excel.
     
@@ -319,7 +344,7 @@ def process_schedule_export_request(request_data, output_dir="excel_exports"):
         output_file = os.path.join(output_dir, f"schedule_export_{current_date}.xlsx")
         
         # Создаем Excel-файл
-        return create_excel_from_html_data(schedule_data, output_file)
+        return create_excel_from_html_data(schedule_data, output_file, sync_metadata=sync_metadata)
     
     except ExcelExportValidationError:
         raise

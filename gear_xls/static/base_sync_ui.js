@@ -2,6 +2,7 @@
   "use strict";
 
   var _baseRevision = null;
+  var _appliedBaseRevision;
   var _basePendingUpdate = false;
   var _blockNewEditsUntilSync = false;
   var _updateBannerTimer = null;
@@ -555,6 +556,7 @@
       return data || null;
     }
     setBaseRevision(data.base_revision);
+    _appliedBaseRevision = data.base_revision || null;
     if (data.published_base_available !== true) {
       _basePendingUpdate = false;
       _blockNewEditsUntilSync = false;
@@ -1623,6 +1625,9 @@
     },
     getBaseRevision: function () {
       return _baseRevision;
+    },
+    getAppliedBaseRevision: function () {
+      return _appliedBaseRevision;
     },
     setBaseRevision: setBaseRevision,
     handleBaseRevision: handleBaseRevision,

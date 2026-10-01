@@ -4,6 +4,12 @@ Module for output utilities.
 
 import pandas as pd
 import re
+from gear_xls.schedule_exchange import (
+    RECORD_COLUMNS, normalize_exchange_record, check_unique_block_ids, write_sync_metadata,
+)
+
+SCHEDULE_COLUMNS = ["subject", "group", "teacher", "room", "building", "day", "start_time",
+                    "end_time", "duration", "pause_before", "pause_after", "lesson_type", "trial_dates_json"]
 
 _INVALID_EXCEL_SHEET_CHARS = re.compile(r"[\[\]:*?/\\]")
 _MAX_EXCEL_SHEET_NAME_LEN = 31
@@ -111,15 +117,21 @@ def export_to_excel(optimizer, filename="schedule.xlsx"):
     """
     if not optimizer.solution:
         return False
+    normalized = [normalize_exchange_record(row) for row in optimizer.solution]
+    check_unique_block_ids(normalized)
     
     # Используем контекстный менеджер для автоматического закрытия файла
     with pd.ExcelWriter(filename, engine='openpyxl') as writer:
         used_sheet_names = set()
 
         # Main schedule
-        main_df = pd.DataFrame(optimizer.solution)
+        main_df = pd.DataFrame(optimizer.solution).reindex(columns=SCHEDULE_COLUMNS + list(RECORD_COLUMNS))
         main_sheet_name = make_safe_sheet_name("", "Schedule", used_sheet_names)
         main_df.to_excel(writer, sheet_name=main_sheet_name, index=False)
+        for row in writer.book[main_sheet_name].iter_rows(min_row=2, min_col=14):
+            for cell in row:
+                cell.number_format = '@'
+        write_sync_metadata(writer.book, getattr(optimizer, 'sync_metadata', None))
         
         # Teacher schedules
         for teacher in optimizer.teachers:

@@ -49,6 +49,7 @@ from gear_xls.runtime_paths import (
 from auth import authenticate, current_user, get_or_create_secret_key, login_required, role_required
 import backup_manager
 from excel_exporter import ExcelExportValidationError, process_schedule_export_request
+from gear_xls.schedule_exchange import ScheduleExchangeError, normalize_sync_metadata
 import lock_manager
 import restore_manager
 import rooms_report
@@ -1185,7 +1186,12 @@ def export_to_excel():
         )
         logger.info("Размер данных: %s байт", len(schedule_data_json))
 
-        output_file = process_schedule_export_request(schedule_data_json, EXCEL_EXPORTS_DIR)
+        # Never label an old client payload with fresh server revisions.
+        raw_metadata = request.form.get("schedule_sync")
+        sync_metadata = normalize_sync_metadata(json.loads(raw_metadata)) if raw_metadata else None
+        output_file = process_schedule_export_request(
+            schedule_data_json, EXCEL_EXPORTS_DIR, sync_metadata=sync_metadata,
+        )
         if not output_file or not os.path.exists(output_file):
             logger.error("Не удалось создать Excel-файл")
             return jsonify({"error": "Не удалось создать Excel-файл"}), 500
@@ -1200,6 +1206,8 @@ def export_to_excel():
         logger.info("Excel-файл успешно отправлен: %s", output_file)
         return response
 
+    except (ScheduleExchangeError, json.JSONDecodeError) as e:
+        return jsonify({"error": str(e), "code": "INVALID_EXPORT_DATA"}), 400
     except ExcelExportValidationError as e:
         logger.warning("Excel export validation failed: %s", e.message)
         return jsonify({"error": e.message, "code": e.code}), 400

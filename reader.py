@@ -6,6 +6,9 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional, Set, Any
 from pathlib import Path
+from gear_xls.schedule_exchange import (
+    read_sync_metadata, normalize_exchange_record, check_unique_block_ids, ScheduleExchangeError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +69,10 @@ class ScheduleClass:
                  lesson_type: str = "",
                  trial_dates: Optional[List[str]] = None,
                  rental_dates: Optional[List[str]] = None,
-                 block_id: str = ""):
+                 block_id: str = "",
+                 source_layer: str = "",
+                 color: str = "",
+                 block_metadata: Optional[Dict] = None):
         
         self.subject = _clean_text(subject)
         self.group = _clean_text(group)
@@ -86,6 +92,9 @@ class ScheduleClass:
         self.column = column
         self.lesson_type = _clean_text(lesson_type).lower()
         self.block_id = _clean_text(block_id)
+        self.source_layer = source_layer
+        self.color = color
+        self.block_metadata = dict(block_metadata or {})
         self.rental_dates = list(rental_dates or []) if self.lesson_type == "rental" else []
         self.trial_dates = []
         if self.lesson_type == "trial" and isinstance(trial_dates, list):
@@ -177,6 +186,7 @@ class ScheduleReader:
         self.rooms = set()
         self.buildings = set()
         self.days = set()
+        self.sync_metadata = None
 
     def _parse_trial_dates_json(self, raw_value: Any, source_label: str) -> List[str]:
         """Parse optional trial_dates_json payload and return a normalized list."""
@@ -210,8 +220,6 @@ class ScheduleReader:
         for row_idx in range(2, metadata_sheet.max_row + 1):
             raw_section_index = metadata_sheet.cell(row=row_idx, column=1).value
             raw_column_letter = metadata_sheet.cell(row=row_idx, column=2).value
-            raw_lesson_type = metadata_sheet.cell(row=row_idx, column=3).value
-            raw_trial_dates_json = metadata_sheet.cell(row=row_idx, column=4).value
 
             try:
                 if raw_section_index in (None, ""):
@@ -233,18 +241,15 @@ class ScheduleReader:
                 )
                 continue
 
-            lesson_type = str(raw_lesson_type).strip().lower() if raw_lesson_type is not None else ""
-            trial_dates = []
-            if lesson_type == "trial":
-                trial_dates = self._parse_trial_dates_json(
-                    raw_trial_dates_json,
-                    f"__service_metadata row {row_idx}",
-                )
-
-            metadata_lookup[(section_index, column_letter)] = {
-                "lesson_type": lesson_type or "",
-                "trial_dates": trial_dates,
+            key = (section_index, column_letter)
+            if key in metadata_lookup:
+                raise ScheduleExchangeError(f"Duplicate service metadata key: {key}")
+            headers = {str(cell.value).strip().lower(): cell.column for cell in metadata_sheet[1] if cell.value}
+            metadata_lookup[key] = {
+                name: metadata_sheet.cell(row_idx, column).value
+                for name, column in headers.items() if name not in ("section_index", "column_letter")
             }
+            metadata_lookup[key]["_legacy"] = "rental_dates_json" not in headers
 
         return metadata_lookup
         
@@ -252,6 +257,7 @@ class ScheduleReader:
         """Read and parse the Excel file to extract scheduling data."""
         # Read the Excel file with both data_only and with formulas
         workbook_data = openpyxl.load_workbook(self.file_path, data_only=True)
+        self.sync_metadata = read_sync_metadata(workbook_data)
         
         # Get the planning sheet
         planning_sheet = None
@@ -359,6 +365,19 @@ class ScheduleReader:
                         pause_after = 0
 
                     metadata = service_metadata.get((section_index, col_letter), {})
+                    raw_record = {
+                        "subject": subject, "day": day, "room": main_room, "building": building,
+                        "start_time": start_time, "end_time": end_time, "duration": duration,
+                        **{key: value for key, value in metadata.items() if key != "_legacy"},
+                    }
+                    # Older VBA writes fixed starts and duration, without an end cell.
+                    from gear_xls.lesson_type_utils import is_legacy_rental_subject
+                    legacy = self.sync_metadata is None and metadata.get("_legacy", True)
+                    if (str(metadata.get("lesson_type") or "").lower() == "rental"
+                            or legacy and is_legacy_rental_subject(subject)) and start_time and not end_time:
+                        raw_record["end_time"] = (datetime.strptime(start_time, "%H:%M")
+                                                   + timedelta(minutes=duration)).strftime("%H:%M")
+                    normalized = normalize_exchange_record(raw_record, legacy=legacy)
                     
                     # Create ScheduleClass object
                     class_data = ScheduleClass(
@@ -376,8 +395,13 @@ class ScheduleReader:
                         pause_after=pause_after,
                         section_index=section_index,
                         column=col_letter,
-                        lesson_type=metadata.get("lesson_type", ""),
-                        trial_dates=metadata.get("trial_dates", [])
+                        lesson_type=normalized["lesson_type"],
+                        trial_dates=normalized["trial_dates"],
+                        rental_dates=normalized["rental_dates"],
+                        block_id=normalized["block_id"],
+                        source_layer=normalized["source_layer"],
+                        color=normalized.get("color") or "",
+                        block_metadata=normalized["block_metadata"],
                     )
                     
                     # Update sets of teachers, groups, rooms, buildings, days
@@ -439,6 +463,8 @@ class ScheduleReader:
                         print(f"    WARNING: This linked class is not in the all_classes list!")
         
         self.planning_sections = all_classes
+        check_unique_block_ids({"block_id": cls.block_id} for cls in all_classes)
+        workbook_data.close()
         return all_classes
     
     def _format_time(self, time_value: Any) -> Optional[str]:

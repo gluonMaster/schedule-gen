@@ -15,7 +15,7 @@ class ScheduleOptimizer:
     based on the input constraints.
     """
     
-    def __init__(self, classes: List[ScheduleClass], time_interval: int = 15, calculation_date=None):
+    def __init__(self, classes: List[ScheduleClass], time_interval: int = 15, calculation_date=None, sync_metadata=None):
         """
         Initialize the scheduler with the given classes and time interval.
         
@@ -24,6 +24,7 @@ class ScheduleOptimizer:
             time_interval: Time interval in minutes for scheduling (default: 15)
         """
         self.classes = classes
+        self.sync_metadata = sync_metadata
         self.time_interval = time_interval
         self.calculation_date = calculation_date or date.today()
         
@@ -282,6 +283,9 @@ class ScheduleOptimizer:
                     "trial_dates_json": trial_dates_json,
                     "block_id": getattr(c, "block_id", ""),
                     "rental_dates_json": json.dumps(c.rental_dates) if is_rental(c) else "",
+                    "source_layer": getattr(c, "source_layer", ""),
+                    "color": getattr(c, "color", ""),
+                    "block_metadata_json": json.dumps(getattr(c, "block_metadata", {}), ensure_ascii=False),
                 })
             
         # В случае INFEASIBLE, вызвать анализ конфликтов

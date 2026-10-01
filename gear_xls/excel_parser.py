@@ -11,6 +11,15 @@ import pandas as pd
 import openpyxl
 from datetime import datetime
 from typing import Dict, Any
+from gear_xls.schedule_exchange import (
+    ScheduleExchangeError, RECORD_COLUMNS, read_sync_metadata,
+    normalize_exchange_record, check_unique_block_ids,
+)
+
+
+class ScheduleActivities(dict):
+    """Keep workbook provenance separate from the sequential activity keys."""
+    sync_metadata = None
 
 # Настройка логирования
 logging.basicConfig(
@@ -59,12 +68,13 @@ def parse_schedule(excel_file):
         dict: Словарь с информацией о занятиях
     """
     logger.info(f"Начинаем парсинг Excel-файла: {excel_file}")
-    activities = {}
+    activities = ScheduleActivities()
     
     try:
         # Загружаем Excel-файл с помощью openpyxl (для корректной работы с датами и временем)
         workbook = openpyxl.load_workbook(excel_file, data_only=True)
         sheet = workbook['Schedule']
+        activities.sync_metadata = read_sync_metadata(workbook)
         
         header_lookup = _build_header_lookup(sheet)
         subject_col = _resolve_column_index(header_lookup, 1, "subject")
@@ -78,12 +88,12 @@ def parse_schedule(excel_file):
         duration_col = _resolve_column_index(header_lookup, 9, "duration")
         lesson_type_col = _resolve_column_index(
             header_lookup,
-            10 if sheet.max_column >= 10 else None,
+            None,
             "lesson_type", "тип занятия",
         )
         trial_dates_col = _resolve_column_index(
             header_lookup,
-            11 if sheet.max_column >= 11 else None,
+            None,
             "trial_dates_json", "даты (json)",
         )
 
@@ -115,25 +125,13 @@ def parse_schedule(excel_file):
                 if lesson_type_value is not None:
                     lesson_type = str(lesson_type_value).strip().lower() or None
 
-            if lesson_type == "trial" and trial_dates_col is not None:
+            if trial_dates_col is not None:
                 raw_trial_dates = sheet.cell(row=row_idx, column=trial_dates_col).value
                 if raw_trial_dates not in (None, ""):
                     try:
-                        parsed_trial_dates = json.loads(raw_trial_dates)
-                        if isinstance(parsed_trial_dates, list):
-                            trial_dates = [str(item) for item in parsed_trial_dates if item is not None]
-                        else:
-                            logger.warning(
-                                "trial_dates_json is not a list in row %s: %r",
-                                row_idx,
-                                raw_trial_dates,
-                            )
-                    except Exception as exc:
-                        logger.warning(
-                            "Failed to parse trial_dates_json in row %s: %s",
-                            row_idx,
-                            exc,
-                        )
+                        trial_dates = json.loads(raw_trial_dates)
+                    except (TypeError, ValueError) as exc:
+                        raise ScheduleExchangeError(f"Invalid trial_dates_json in row {row_idx}") from exc
             
             # Обработка названия кабинета и извлечение здания
             room_info = process_room_name(room, building)
@@ -144,24 +142,33 @@ def parse_schedule(excel_file):
                 "start_time": start_time,
                 "end_time": end_time,
                 "duration": int(duration) if duration is not None else 0,
-                "teacher": teacher,
+                "teacher": teacher if teacher is not None else "",
                 "subject": subject,
                 "room": room_info["full_name"],
                 "room_display": room_info["display_name"],
                 "building": room_info["building"],
-                "students": group,
+                "students": group if group is not None else "",
             }
             if lesson_type:
                 activities[act_id]["lesson_type"] = lesson_type
-            if lesson_type == "trial":
-                activities[act_id]["trial_dates"] = trial_dates
+            activities[act_id]["trial_dates"] = trial_dates
+            for name in RECORD_COLUMNS:
+                column = header_lookup.get(name)
+                if column:
+                    activities[act_id][name] = sheet.cell(row_idx, column).value
+            legacy = activities.sync_metadata is None and 'rental_dates_json' not in header_lookup
+            activities[act_id] = normalize_exchange_record(activities[act_id], legacy=legacy)
             
             act_id += 1
             row_idx += 1
             
+        check_unique_block_ids(activities.values())
+        workbook.close()
         logger.info(f"Парсинг завершен. Извлечено {len(activities)} занятий.")
         return activities
         
+    except ScheduleExchangeError:
+        raise
     except Exception as e:
         logger.error(f"Ошибка при парсинге Excel-файла: {e}")
         import traceback

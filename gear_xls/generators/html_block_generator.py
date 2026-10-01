@@ -194,8 +194,10 @@ class HTMLBlockGenerator:
         managed_attrs = ""
         if lesson_type in ('individual', 'nachhilfe', 'trial', 'rental'):
             managed_attrs = " data-source-layer='individual' "
-            if interval.get('id'):
-                managed_attrs += f"data-block-id='{html_escape(str(interval['id']), quote=True)}' "
+            block_id = interval.get('block_id', interval.get('id'))
+            if block_id:
+                managed_attrs += f"data-block-id='{html_escape(str(block_id), quote=True)}' "
+            managed_attrs += f"data-block-metadata='{html_escape(json.dumps(interval.get('block_metadata', {}), ensure_ascii=False), quote=True)}' "
 
         # Отладочная информация для диагностики
         logger.debug(f"Генерация блока: день='{day}', колонка={col_index}, здание='{building}'")

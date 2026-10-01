@@ -159,7 +159,7 @@ def main():
         print_summary(reader, classes)
 
     print(f"\nCreating schedule optimization model...")
-    optimizer = ScheduleOptimizer(classes, time_interval=args.time_interval)
+    optimizer = ScheduleOptimizer(classes, time_interval=args.time_interval, sync_metadata=reader.sync_metadata)
     
     print(f"Solving schedule optimization problem (time limit: {args.time_limit} seconds)...")
     start_time = time.time()

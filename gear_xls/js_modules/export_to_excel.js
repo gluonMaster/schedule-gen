@@ -157,7 +157,8 @@ function collectScheduleData(options) {
                 trial_dates_json: trialDatesJson,
                 rental_dates_json: lessonType === 'rental' ? (block.getAttribute('data-rental-dates') || '[]') : '',
                 block_id: block.getAttribute('data-block-id') || '',
-                source_layer: block.getAttribute('data-source-layer') || (block.getAttribute('data-block-id') ? 'individual' : 'base')
+                source_layer: block.getAttribute('data-source-layer') || (block.getAttribute('data-block-id') ? 'individual' : 'base'),
+                block_metadata_json: block.getAttribute('data-block-metadata') || '{}'
             };
             
             // Добавляем активность в общий список
@@ -169,10 +170,15 @@ function collectScheduleData(options) {
 }
 
 function validateScheduleDataForExcelExport(scheduleData) {
+    var ids = new Set();
     for (var i = 0; i < scheduleData.length; i++) {
         var activity = scheduleData[i] || {};
         var day = String(activity.day || '').trim();
         var lessonType = String(activity.lesson_type || 'group').trim() || 'group';
+        if (activity.block_id) {
+            if (ids.has(activity.block_id)) return { ok: false, message: 'Экспорт остановлен: повторный ID записи.' };
+            ids.add(activity.block_id);
+        }
 
         var datedRental = false;
         if (lessonType === 'rental') {
@@ -312,9 +318,23 @@ function _refreshIndividualBeforeExport(onReady, onError) {
             }
             try {
                 refreshResult = window.refreshIndividualLayer(data);
+                var snapshotMetadata = null;
+                var baseUi = window.SchedGenBaseSyncUI;
+                var baseRevision = baseUi && typeof baseUi.getAppliedBaseRevision === 'function'
+                    ? baseUi.getAppliedBaseRevision() : undefined;
+                var individualRevision = Object.prototype.hasOwnProperty.call(data, 'individual_revision')
+                    ? data.individual_revision : data.last_modified;
+                if (typeof baseRevision !== 'undefined' && typeof individualRevision !== 'undefined') {
+                    snapshotMetadata = {
+                        format_version: 1,
+                        source_base_revision: baseRevision === null ? '' : baseRevision,
+                        source_individual_revision: individualRevision === null ? '' : individualRevision,
+                        snapshot_scope: baseUi.hasUnpublishedGroupChanges && baseUi.hasUnpublishedGroupChanges() ? 'partial' : 'full'
+                    };
+                }
                 if (refreshResult && typeof refreshResult.then === 'function') {
                     refreshResult.then(function() {
-                        onReady();
+                        onReady(snapshotMetadata);
                     }).catch(function() {
                         onError('refresh_failed');
                     });
@@ -325,7 +345,7 @@ function _refreshIndividualBeforeExport(onReady, onError) {
                 return;
             }
 
-            onReady();
+            onReady(snapshotMetadata);
         } else if (xhr.status === 401) {
             if (typeof window.handleSessionExpired === 'function') {
                 window.handleSessionExpired();
@@ -467,7 +487,7 @@ function exportScheduleToExcel(onDone, options) {
                 return;
             }
 
-            _refreshIndividualBeforeExport(function() {
+            _refreshIndividualBeforeExport(function(snapshotMetadata) {
                 // Собираем данные расписания
                 var scheduleData = collectScheduleData({ includeHidden: true });
                 var exportValidation = validateScheduleDataForExcelExport(scheduleData);
@@ -558,7 +578,8 @@ function exportScheduleToExcel(onDone, options) {
                 
                 // Формируем данные запроса
                 var formData = 'schedule_data=' + encodeURIComponent(JSON.stringify(scheduleData)) + 
-                              '&csrf_token=' + encodeURIComponent(csrfToken);
+                              '&csrf_token=' + encodeURIComponent(csrfToken) +
+                              (snapshotMetadata ? '&schedule_sync=' + encodeURIComponent(JSON.stringify(snapshotMetadata)) : '');
                 
                 // Отправляем запрос
                 xhr.send(formData);

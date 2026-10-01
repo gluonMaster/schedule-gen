@@ -56,7 +56,7 @@ def _is_embedded_non_group_block(attrs_text: str) -> bool:
     class_match = re.search(r"class=['\"]([^'\"]*)['\"]", attrs_text, re.I)
     classes = class_match.group(1).lower().split() if class_match else []
     return any(
-        cls in ("lesson-type-individual", "lesson-type-nachhilfe", "lesson-type-trial")
+        cls in ("lesson-type-individual", "lesson-type-nachhilfe", "lesson-type-trial", "lesson-type-rental")
         for cls in classes
     )
 
@@ -86,7 +86,7 @@ def strip_non_group_activity_blocks_from_file(path: str) -> int:
 
 def collect_individual_blocks_from_buildings(buildings: dict) -> list[dict]:
     blocks = []
-    seen_signatures = set()
+    seen_ids = set()
 
     for building, building_data in buildings.items():
         if str(building).startswith("_") or not isinstance(building_data, dict):
@@ -106,25 +106,15 @@ def collect_individual_blocks_from_buildings(buildings: dict) -> list[dict]:
                     for value in (interval.get("trial_dates") or [])
                     if value is not None
                 ]
-                signature = (
-                    str(interval.get("id", "")),
-                    str(building),
-                    str(day),
-                    room,
-                    start_time,
-                    end_time,
-                    str(interval.get("subject", "")),
-                    str(interval.get("teacher", "")),
-                    str(interval.get("students", "")),
-                    lesson_type,
-                    tuple(trial_dates),
-                )
-                if signature in seen_signatures:
-                    continue
-                seen_signatures.add(signature)
+                block_id = str(interval.get("block_id", interval.get("id")) or "")
+                if block_id and block_id in seen_ids:
+                    raise SchedulePipelineError(f"Duplicate block_id: {block_id}")
+                if block_id:
+                    seen_ids.add(block_id)
 
                 block = {
-                    "id": str(interval.get("id") or uuid.uuid4()),
+                    **interval.get("block_metadata", {}),
+                    "id": block_id,
                     "day": str(day),
                     "building": str(building),
                     "room": room,
@@ -140,6 +130,8 @@ def collect_individual_blocks_from_buildings(buildings: dict) -> list[dict]:
                 }
                 if lesson_type == "trial":
                     block["trial_dates"] = trial_dates
+                if lesson_type == "rental":
+                    block["rental_dates"] = list(interval.get("rental_dates", []))
                 blocks.append({key: value for key, value in block.items() if value is not None})
 
     return blocks
@@ -246,6 +238,7 @@ class SchedulePipeline:
                 'individual_blocks': individual_blocks,
                 'activities_count': activities_count,
                 'buildings_count': buildings_count
+                , 'sync_metadata': getattr(activities, 'sync_metadata', None)
             }
             
             logger.info(f"Обработка завершена успешно. Обработано {activities_count} занятий, "

@@ -818,6 +818,13 @@
       (block.lesson_type || "individual");
     element.setAttribute("data-block-id", block.id || "");
     element.setAttribute("data-source-layer", "individual");
+    var exchangeExtra = {};
+    var exchangeCore = ["id", "day", "building", "room", "subject", "teacher", "students",
+      "start_time", "end_time", "lesson_type", "color", "trial_dates", "rental_dates", "start_row", "row_span"];
+    Object.keys(block).forEach(function (key) {
+      if (exchangeCore.indexOf(key) === -1) exchangeExtra[key] = block[key];
+    });
+    element.setAttribute("data-block-metadata", JSON.stringify(exchangeExtra));
     element.setAttribute("data-day", day);
     element.setAttribute("data-col-index", String(colIndex));
     element.setAttribute("data-building", building);
