@@ -551,17 +551,19 @@
 
   function applyBaseScheduleData(data) {
     var blocks;
+    var appliedRevision;
 
     if (!data || (!("base_revision" in data) && !("published_base_available" in data))) {
       return data || null;
     }
+    appliedRevision = 'base_revision' in data ? (data.base_revision || null) : undefined;
     setBaseRevision(data.base_revision);
-    _appliedBaseRevision = data.base_revision || null;
     if (data.published_base_available !== true) {
       _basePendingUpdate = false;
       _blockNewEditsUntilSync = false;
       clearUpdateBanner();
       syncBlockUi();
+      _appliedBaseRevision = appliedRevision;
       return data;
     }
 
@@ -578,6 +580,7 @@
     setPublishedGroupBaseline(blocks);
     clearUpdateBanner();
     syncBlockUi();
+    _appliedBaseRevision = appliedRevision;
     return data;
   }
 
@@ -686,6 +689,7 @@
       }
 
       setBaseRevision(publishResult.data.base_revision || publishResult.data.published_at);
+      _appliedBaseRevision = _baseRevision;
       _basePendingUpdate = false;
       _blockNewEditsUntilSync = false;
       setPublishedGroupBaseline(blocks);

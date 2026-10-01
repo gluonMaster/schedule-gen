@@ -167,6 +167,27 @@ function current() { return container.querySelector('[data-block-id="rental-stab
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
 async function run() {
+    if (process.argv.includes('--exchange-only')) {
+        api.applyIndividualState({ individual_revision: 'snapshot-revision', individual: [{
+            id: 'rental-stable', building: 'Villa', day: 'Mo', room: '1.01',
+            subject: 'Other rental name', teacher: '', students: '', lesson_type: 'rental',
+            start_time: '10:00', end_time: '11:00', duration: 60,
+            rental_dates: ['2026-09-28', '2026-10-05'], notes: 'ä & <>', created_by: 'organizer_one',
+        }] });
+        const block = current();
+        const extra = JSON.parse(block.getAttribute('data-block-metadata'));
+        assert.deepEqual(extra, { notes: 'ä & <>', created_by: 'organizer_one' });
+        block.setAttribute('data-start-row', 24);
+        context.syncBlockContent(block);
+        const exported = context.collectScheduleData({ includeHidden: true })[0];
+        assert.equal(exported.block_id, 'rental-stable');
+        assert.equal(exported.lesson_type, 'rental');
+        assert.equal(exported.teacher, ''); assert.equal(exported.students, '');
+        assert.deepEqual(JSON.parse(exported.rental_dates_json), ['2026-09-28', '2026-10-05']);
+        assert.deepEqual(JSON.parse(exported.block_metadata_json), extra);
+        console.log(`Rental metadata rendering/serialization passed (${((performance.now() - started) / 1000).toFixed(3)}s)`);
+        return;
+    }
     api.interceptCreateSubmit(event(createForm)); await tick();
     assert.equal(requests[0].payload.lesson_type, 'rental');
     assert.deepEqual(requests[0].payload.rental_dates, []);

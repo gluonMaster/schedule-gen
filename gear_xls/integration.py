@@ -15,6 +15,8 @@ import re
 import json
 import tempfile
 import sys
+import uuid
+import openpyxl
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,6 +41,7 @@ from gear_xls.runtime_paths import (
     get_schedule_state_dir,
     get_spiski_dir,
 )
+from gear_xls.schedule_exchange import read_sync_metadata, normalize_sync_metadata
 
 # Настройка логирования
 logging.basicConfig(
@@ -130,14 +133,55 @@ def _write_json_atomic(path: str, payload: dict) -> None:
                 pass
 
 
-def reset_web_editor_state(individual_blocks: list[dict] | None = None) -> None:
+def check_generation_origin(sync_metadata):
+    """Legacy primary imports may initialize empty state, never replace live data.
+
+    Full revision/lock checks and coordinated application belong to phase 4.
+    """
+    sync_metadata = normalize_sync_metadata(sync_metadata)
+    if sync_metadata is not None:
+        if sync_metadata['snapshot_scope'] != 'full':
+            raise SchedulePipelineError("Частичный Excel-снимок не может заменять состояние редактора.")
+        return
+    state_dir = get_schedule_state_dir()
+    for filename in ('base_schedule.json', 'individual_lessons.json'):
+        path = os.path.join(state_dir, filename)
+        if os.path.exists(path):
+            with open(path, encoding='utf-8') as source:
+                state = json.load(source)
+            if state.get('blocks') or state.get('last_modified') or state.get('published_at'):
+                raise SchedulePipelineError(
+                    "Excel без метаданных исходного снимка допустим только для первичного импорта "
+                    "в пустое состояние. Сначала создайте актуальный экспорт."
+                )
+
+
+def check_excel_generation_origin(excel_path):
+    workbook = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
+    try:
+        check_generation_origin(read_sync_metadata(workbook))
+    finally:
+        workbook.close()
+
+
+def reset_web_editor_state(individual_blocks: list[dict] | None = None, sync_metadata=None) -> None:
     """
     Reset runtime state of the web editor so a newly generated app starts
     from the current Excel/HTML outputs instead of stale persisted JSON state.
     """
     state_dir = get_schedule_state_dir()
+    check_generation_origin(sync_metadata)
 
-    individual_blocks = list(individual_blocks or [])
+    individual_blocks = [dict(block) for block in (individual_blocks or [])]
+    seen_ids = set()
+    for block in individual_blocks:
+        if not block.get('id'):
+            if sync_metadata is not None:
+                raise SchedulePipelineError("Управляемая запись снимка не содержит block_id")
+            block['id'] = str(uuid.uuid4())
+        if block['id'] in seen_ids:
+            raise SchedulePipelineError(f"Duplicate block_id: {block['id']}")
+        seen_ids.add(block['id'])
 
     _write_json_atomic(
         os.path.join(state_dir, "base_schedule.json"),
@@ -301,8 +345,9 @@ def run_full_pipeline(excel_file_path: str,                     time_interval: i
         
         # Выполняем основную обработку
         logger.info("Запуск обработки через SchedulePipeline...")
+        check_excel_generation_origin(excel_file_path)
         result = pipeline.process_excel_to_outputs(excel_file_path, output_dirs, spiski_data=spiski_data)
-        reset_web_editor_state(result.get("individual_blocks"))
+        reset_web_editor_state(result.get("individual_blocks"), sync_metadata=result.get("sync_metadata"))
         logger.info("Обработка завершена успешно:")
         logger.info(f"  - Входной файл: {excel_file_path}")
         logger.info(f"  - Занятий обработано: {result['activities_count']}")

@@ -318,24 +318,25 @@ function _refreshIndividualBeforeExport(onReady, onError) {
             }
             try {
                 refreshResult = window.refreshIndividualLayer(data);
-                var snapshotMetadata = null;
-                var baseUi = window.SchedGenBaseSyncUI;
-                var baseRevision = baseUi && typeof baseUi.getAppliedBaseRevision === 'function'
-                    ? baseUi.getAppliedBaseRevision() : undefined;
-                var individualRevision = Object.prototype.hasOwnProperty.call(data, 'individual_revision')
-                    ? data.individual_revision : data.last_modified;
-                if (typeof baseRevision !== 'undefined' && typeof individualRevision !== 'undefined') {
-                    snapshotMetadata = {
-                        format_version: 1,
-                        source_base_revision: baseRevision === null ? '' : baseRevision,
-                        source_individual_revision: individualRevision === null ? '' : individualRevision,
-                        snapshot_scope: baseUi.hasUnpublishedGroupChanges && baseUi.hasUnpublishedGroupChanges() ? 'partial' : 'full'
-                    };
-                }
+                var snapshotReady = function() {
+                    var snapshotMetadata = null;
+                    var baseUi = window.SchedGenBaseSyncUI;
+                    var baseRevision = baseUi && typeof baseUi.getAppliedBaseRevision === 'function'
+                        ? baseUi.getAppliedBaseRevision() : undefined;
+                    var individualRevision = Object.prototype.hasOwnProperty.call(data, 'individual_revision')
+                        ? data.individual_revision : data.last_modified;
+                    if (typeof baseRevision !== 'undefined' && typeof individualRevision !== 'undefined') {
+                        snapshotMetadata = {
+                            format_version: 1,
+                            source_base_revision: baseRevision === null ? '' : baseRevision,
+                            source_individual_revision: individualRevision === null ? '' : individualRevision,
+                            snapshot_scope: 'full'
+                        };
+                    }
+                    onReady(snapshotMetadata);
+                };
                 if (refreshResult && typeof refreshResult.then === 'function') {
-                    refreshResult.then(function() {
-                        onReady(snapshotMetadata);
-                    }).catch(function() {
+                    refreshResult.then(snapshotReady).catch(function() {
                         onError('refresh_failed');
                     });
                     return;
@@ -345,7 +346,7 @@ function _refreshIndividualBeforeExport(onReady, onError) {
                 return;
             }
 
-            onReady(snapshotMetadata);
+            snapshotReady();
         } else if (xhr.status === 401) {
             if (typeof window.handleSessionExpired === 'function') {
                 window.handleSessionExpired();

@@ -1,8 +1,8 @@
 """Metadata at the existing Schedule/Plannung workbook boundaries."""
 import json
 import re
+from gear_xls.day_constants import WEB_EDITOR_DAY_SET
 
-from gear_xls.day_constants import DAY_TO_WEEKDAY
 from gear_xls.lesson_type_utils import (
     classify_lesson_type, is_legacy_rental_subject, validate_rental_dates,
 )
@@ -16,6 +16,7 @@ CORE_FIELDS = {
     "building", "day", "start_time", "end_time", "duration", "lesson_type", "color",
     "trial_dates", "rental_dates", "trial_dates_json", "rental_dates_json", "source_layer",
     "start_row", "row_span", "row_start", "rowspan", "col", "block_metadata_json",
+    "pause_before", "pause_after", "block_metadata",
 }
 
 
@@ -98,6 +99,8 @@ def normalize_exchange_record(record, *, legacy=False):
     if rental_dates and lesson_type != "rental" or trial_dates and lesson_type != "trial":
         raise ScheduleExchangeError("Dates contradict lesson_type")
     result.update(lesson_type=lesson_type, trial_dates=trial_dates, rental_dates=rental_dates)
+    result['trial_dates_json'] = json.dumps(trial_dates, ensure_ascii=False) if lesson_type == 'trial' else ''
+    result['rental_dates_json'] = json.dumps(rental_dates, ensure_ascii=False) if lesson_type == 'rental' else ''
     if lesson_type in ("rental", "trial"):
         field = "rental_dates" if lesson_type == "rental" else "trial_dates"
         error = validate_rental_dates(result.get("day"), result[field])
@@ -105,16 +108,28 @@ def normalize_exchange_record(record, *, legacy=False):
         if error and not (lesson_type == "trial" and not result[field]):
             raise ScheduleExchangeError(error.replace("rental_dates", field))
     if lesson_type == "rental":
+        if not isinstance(result.get('day'), str) or result['day'] not in WEB_EDITOR_DAY_SET:
+            raise ScheduleExchangeError("Invalid rental day")
         for key in ("start_time", "end_time"):
             if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", str(result.get(key) or "")):
                 raise ScheduleExchangeError(f"Invalid rental {key}")
         start, end = (sum(int(n) * factor for n, factor in zip(result[key].split(":"), (60, 1)))
                       for key in ("start_time", "end_time"))
-        if end <= start or int(result.get("duration") or 0) != end - start:
+        try:
+            duration = float(result.get('duration') or 0)
+        except (TypeError, ValueError) as exc:
+            raise ScheduleExchangeError("Invalid rental duration") from exc
+        if end <= start or duration != end - start:
             raise ScheduleExchangeError("Rental duration contradicts start_time/end_time")
+        result['duration'] = int(duration)
         if not result.get("room") or not result.get("building"):
             raise ScheduleExchangeError("Rental room and building are required")
-    block_id = str(result.get("block_id") or "").strip()
+    raw_id = result.get('block_id')
+    block_id = str(raw_id).strip() if raw_id is not None else ''
+    if lesson_type in MANAGED_TYPES and result.get('id'):
+        if block_id and block_id != str(result['id']):
+            raise ScheduleExchangeError("id contradicts block_id")
+        block_id = str(result['id'])
     source_layer = str(result.get("source_layer") or "").strip()
     if lesson_type == "group" and (block_id or source_layer == "individual"):
         raise ScheduleExchangeError("Group row cannot carry a managed block_id/source_layer")
@@ -122,7 +137,9 @@ def normalize_exchange_record(record, *, legacy=False):
     if source_layer and source_layer != expected_layer:
         raise ScheduleExchangeError("source_layer contradicts lesson_type")
     result.update(block_id=block_id, source_layer=expected_layer)
-    raw_extra = result.get("block_metadata_json") or "{}"
+    raw_extra = result.get("block_metadata_json") or result.get("block_metadata") or {
+        key: value for key, value in result.items() if key not in CORE_FIELDS
+    }
     try:
         extra = json.loads(raw_extra) if isinstance(raw_extra, str) else raw_extra
     except (TypeError, ValueError) as exc:
@@ -133,10 +150,12 @@ def normalize_exchange_record(record, *, legacy=False):
     return result
 
 
-def check_unique_block_ids(records):
+def check_unique_block_ids(records, sync_metadata=None):
     seen = set()
     for record in records:
         block_id = record.get("block_id")
+        if sync_metadata is not None and record.get('lesson_type') in MANAGED_TYPES and not block_id:
+            raise ScheduleExchangeError("Managed snapshot row is missing block_id")
         if block_id:
             if block_id in seen:
                 raise ScheduleExchangeError(f"Duplicate block_id: {block_id}")

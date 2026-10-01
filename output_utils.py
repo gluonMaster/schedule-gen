@@ -4,6 +4,7 @@ Module for output utilities.
 
 import pandas as pd
 import re
+import json
 from gear_xls.schedule_exchange import (
     RECORD_COLUMNS, normalize_exchange_record, check_unique_block_ids, write_sync_metadata,
 )
@@ -118,14 +119,18 @@ def export_to_excel(optimizer, filename="schedule.xlsx"):
     if not optimizer.solution:
         return False
     normalized = [normalize_exchange_record(row) for row in optimizer.solution]
-    check_unique_block_ids(normalized)
+    check_unique_block_ids(normalized, getattr(optimizer, 'sync_metadata', None))
     
     # Используем контекстный менеджер для автоматического закрытия файла
     with pd.ExcelWriter(filename, engine='openpyxl') as writer:
         used_sheet_names = set()
 
         # Main schedule
-        main_df = pd.DataFrame(optimizer.solution).reindex(columns=SCHEDULE_COLUMNS + list(RECORD_COLUMNS))
+        for record in normalized:
+            record['trial_dates_json'] = json.dumps(record['trial_dates'], ensure_ascii=False) if record['lesson_type'] == 'trial' else ''
+            record['rental_dates_json'] = json.dumps(record['rental_dates'], ensure_ascii=False) if record['lesson_type'] == 'rental' else ''
+            record['block_metadata_json'] = json.dumps(record['block_metadata'], ensure_ascii=False)
+        main_df = pd.DataFrame(normalized).reindex(columns=SCHEDULE_COLUMNS + list(RECORD_COLUMNS))
         main_sheet_name = make_safe_sheet_name("", "Schedule", used_sheet_names)
         main_df.to_excel(writer, sheet_name=main_sheet_name, index=False)
         for row in writer.book[main_sheet_name].iter_rows(min_row=2, min_col=14):

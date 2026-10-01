@@ -5,6 +5,7 @@
 
 import pandas as pd
 import numpy as np
+import json
 from datetime import datetime
 try:
     from .lesson_type_utils import classify_lesson_type
@@ -69,7 +70,7 @@ def _normalize_columns(df):
 
     positional_map = {}
     normalized_columns = list(normalized_df.columns)
-    for idx, canonical in enumerate(_COLUMN_ORDER[:len(normalized_columns)]):
+    for idx, canonical in enumerate(_COLUMN_ORDER[:min(9, len(normalized_columns))]):
         current = normalized_columns[idx]
         if current == canonical or canonical in normalized_df.columns:
             continue
@@ -112,7 +113,7 @@ def load_data(excel_file_path):
         pandas.DataFrame: Датафрейм с данными расписания
     """
     # Загружаем данные с листа Schedule
-    df = pd.read_excel(excel_file_path, sheet_name='Schedule')
+    df = pd.read_excel(excel_file_path, sheet_name='Schedule', keep_default_na=False, dtype={'block_id': str})
     df = _normalize_columns(df)
     
     # Проверяем структуру данных
@@ -128,6 +129,15 @@ def load_data(excel_file_path):
 
     if 'lesson_type' in df.columns:
         df['lesson_type'] = df['lesson_type'].apply(_normalize_lesson_type_value)
+    df['lesson_type'] = _effective_lesson_types(df)
+    if 'rental_dates_json' not in df.columns:
+        legacy_rental = df['subject'].apply(lambda value: isinstance(value, str) and value.strip().casefold() == 'vermietung')
+        df.loc[legacy_rental, 'lesson_type'] = 'rental'
+        if legacy_rental.any():
+            df['rental_dates_json'] = ''
+            if 'trial_dates_json' in df.columns:
+                df.loc[legacy_rental, 'rental_dates_json'] = df.loc[legacy_rental, 'trial_dates_json']
+                df.loc[legacy_rental, 'trial_dates_json'] = ''
     
     # Убедимся, что start_time и end_time имеют правильный формат времени
     if not pd.api.types.is_datetime64_dtype(df['start_time']):
@@ -167,7 +177,7 @@ def filter_by_lesson_type(df, lesson_type_filter='all'):
         return df
 
     if lesson_type_filter == 'non-group':
-        mask = effective_types.isin(('individual', 'nachhilfe', 'trial'))
+        mask = effective_types.isin(('individual', 'nachhilfe', 'trial', 'rental'))
     else:
         mask = effective_types == lesson_type_filter
     return df[mask].reset_index(drop=True)
@@ -235,6 +245,12 @@ def process_schedule_data(df):
             }
             if 'lesson_type' in day_schedule.columns and pd.notna(row['lesson_type']):
                 lesson['lesson_type'] = str(row['lesson_type']).strip().lower()
+            for key in ('block_id', 'rental_dates_json', 'trial_dates_json'):
+                if key in day_schedule.columns:
+                    lesson[key] = row[key]
+            for kind in ('rental', 'trial'):
+                if lesson.get('lesson_type') == kind:
+                    lesson[kind + '_dates'] = json.loads(lesson.get(kind + '_dates_json') or '[]')
             lessons.append(lesson)
         
         schedule_by_day[day] = lessons

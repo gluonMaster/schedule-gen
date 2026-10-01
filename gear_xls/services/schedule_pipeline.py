@@ -8,7 +8,6 @@
 import os
 import logging
 import re
-import uuid
 from typing import Dict, Any, Optional
 
 # Импортируем существующие модули
@@ -237,8 +236,8 @@ class SchedulePipeline:
                 'buildings': buildings,
                 'individual_blocks': individual_blocks,
                 'activities_count': activities_count,
-                'buildings_count': buildings_count
-                , 'sync_metadata': getattr(activities, 'sync_metadata', None)
+                'buildings_count': buildings_count,
+                'sync_metadata': getattr(activities, 'sync_metadata', None),
             }
             
             logger.info(f"Обработка завершена успешно. Обработано {activities_count} занятий, "

@@ -9,6 +9,7 @@ from pathlib import Path
 from gear_xls.schedule_exchange import (
     read_sync_metadata, normalize_exchange_record, check_unique_block_ids, ScheduleExchangeError,
 )
+from gear_xls.lesson_type_utils import is_legacy_rental_subject
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class ScheduleClass:
         self.section_index = section_index
         self.column = column
         self.lesson_type = _clean_text(lesson_type).lower()
-        self.block_id = _clean_text(block_id)
+        self.block_id = str(block_id).strip() if block_id is not None else ''
         self.source_layer = source_layer
         self.color = color
         self.block_metadata = dict(block_metadata or {})
@@ -216,35 +217,30 @@ class ScheduleReader:
 
         metadata_sheet = workbook["__service_metadata"]
         metadata_lookup: Dict[Tuple[int, str], Dict[str, Any]] = {}
+        headers = {str(cell.value).strip().lower(): cell.column for cell in metadata_sheet[1] if cell.value}
+        if not {'section_index', 'column_letter'}.issubset(headers):
+            raise ScheduleExchangeError("Invalid __service_metadata headers")
 
         for row_idx in range(2, metadata_sheet.max_row + 1):
             raw_section_index = metadata_sheet.cell(row=row_idx, column=1).value
             raw_column_letter = metadata_sheet.cell(row=row_idx, column=2).value
+            if raw_section_index is None and raw_column_letter is None:
+                continue
 
             try:
                 if raw_section_index in (None, ""):
                     raise ValueError("empty section_index")
                 section_index = int(raw_section_index)
             except (TypeError, ValueError):
-                logger.warning(
-                    "Skipping service metadata row %s with invalid section_index: %r",
-                    row_idx,
-                    raw_section_index,
-                )
-                continue
+                raise ScheduleExchangeError(f"Invalid section_index in service metadata row {row_idx}")
 
             column_letter = str(raw_column_letter).strip().upper() if raw_column_letter is not None else ""
-            if not column_letter:
-                logger.warning(
-                    "Skipping service metadata row %s with empty column_letter",
-                    row_idx,
-                )
-                continue
+            if column_letter not in ('B', 'C', 'D') or section_index < 0:
+                raise ScheduleExchangeError(f"Invalid service metadata key in row {row_idx}")
 
             key = (section_index, column_letter)
             if key in metadata_lookup:
                 raise ScheduleExchangeError(f"Duplicate service metadata key: {key}")
-            headers = {str(cell.value).strip().lower(): cell.column for cell in metadata_sheet[1] if cell.value}
             metadata_lookup[key] = {
                 name: metadata_sheet.cell(row_idx, column).value
                 for name, column in headers.items() if name not in ("section_index", "column_letter")
@@ -270,6 +266,7 @@ class ScheduleReader:
             raise ValueError("Could not find 'Plannung' sheet in the Excel file")
 
         service_metadata = self._load_service_metadata(workbook_data)
+        used_metadata_keys = set()
         
         # Helper function to extract time values from cells
         def extract_time(row, column):
@@ -338,6 +335,7 @@ class ScheduleReader:
                     alt_room3 = planning_sheet.cell(row=row+6, column=col_idx).value
                     building = planning_sheet.cell(row=row+7, column=col_idx).value
                     duration = planning_sheet.cell(row=row+8, column=col_idx).value
+                    raw_duration = duration
                     day = planning_sheet.cell(row=row+9, column=col_idx).value
                     
                     # Use our custom function to extract time values
@@ -365,13 +363,13 @@ class ScheduleReader:
                         pause_after = 0
 
                     metadata = service_metadata.get((section_index, col_letter), {})
+                    used_metadata_keys.add((section_index, col_letter))
                     raw_record = {
                         "subject": subject, "day": day, "room": main_room, "building": building,
-                        "start_time": start_time, "end_time": end_time, "duration": duration,
+                        "start_time": start_time, "end_time": end_time, "duration": raw_duration,
                         **{key: value for key, value in metadata.items() if key != "_legacy"},
                     }
                     # Older VBA writes fixed starts and duration, without an end cell.
-                    from gear_xls.lesson_type_utils import is_legacy_rental_subject
                     legacy = self.sync_metadata is None and metadata.get("_legacy", True)
                     if (str(metadata.get("lesson_type") or "").lower() == "rental"
                             or legacy and is_legacy_rental_subject(subject)) and start_time and not end_time:
@@ -390,7 +388,7 @@ class ScheduleReader:
                         duration=duration,
                         day=day,
                         start_time=start_time,
-                        end_time=end_time,
+                        end_time=normalized['end_time'] if normalized['lesson_type'] == 'rental' else end_time,
                         pause_before=pause_before,
                         pause_after=pause_after,
                         section_index=section_index,
@@ -463,7 +461,9 @@ class ScheduleReader:
                         print(f"    WARNING: This linked class is not in the all_classes list!")
         
         self.planning_sections = all_classes
-        check_unique_block_ids({"block_id": cls.block_id} for cls in all_classes)
+        if set(service_metadata) - used_metadata_keys:
+            raise ScheduleExchangeError("Service metadata refers to missing planning entries")
+        check_unique_block_ids(({"block_id": cls.block_id, "lesson_type": cls.lesson_type} for cls in all_classes), self.sync_metadata)
         workbook_data.close()
         return all_classes
     

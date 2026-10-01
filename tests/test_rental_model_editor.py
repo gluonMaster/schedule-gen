@@ -207,6 +207,8 @@ def test_backup_restore_rental_dates_id_and_group_rejection():
 def test_export_validation_accepts_only_dated_sunday_rental(raw_dates, valid):
     from gear_xls.excel_exporter import ExcelExportValidationError, validate_schedule_data_for_export
     block = rental(day="So", rental_dates_json=raw_dates)
+    block.pop("rental_dates")  # Excel payload carries JSON dates, not a conflicting second representation.
+    block['duration'] = 60
     if valid:
         validate_schedule_data_for_export([block])
     else:
@@ -249,7 +251,8 @@ def test_generator_and_route_deliver_updated_editor_code(isolated_editor, tmp_pa
             ("/js_modules/trial_ui.js", "js_modules/trial_ui.js"),
             ("/js_modules/conflict_detector.js", "js_modules/conflict_detector.js"),
         ]:
-            version = "20261001_rental2" if "conflict_detector" in url else "20261001_rental1"
+            version = ("20261001_rental2" if "conflict_detector" in url else
+                       "20261001_rental3" if "individual_ui" in url or "base_sync_ui" in url else "20261001_rental1")
             assert f'{url}?v={version}' in html
             response = client.get(url + "?v=" + version)
             assert response.status_code == 200

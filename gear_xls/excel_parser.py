@@ -141,7 +141,7 @@ def parse_schedule(excel_file):
                 "day": day,
                 "start_time": start_time,
                 "end_time": end_time,
-                "duration": int(duration) if duration is not None else 0,
+                "duration": duration if duration is not None else 0,
                 "teacher": teacher if teacher is not None else "",
                 "subject": subject,
                 "room": room_info["full_name"],
@@ -158,11 +158,12 @@ def parse_schedule(excel_file):
                     activities[act_id][name] = sheet.cell(row_idx, column).value
             legacy = activities.sync_metadata is None and 'rental_dates_json' not in header_lookup
             activities[act_id] = normalize_exchange_record(activities[act_id], legacy=legacy)
+            activities[act_id]['duration'] = int(activities[act_id]['duration'])
             
             act_id += 1
             row_idx += 1
             
-        check_unique_block_ids(activities.values())
+        check_unique_block_ids(activities.values(), activities.sync_metadata)
         workbook.close()
         logger.info(f"Парсинг завершен. Извлечено {len(activities)} занятий.")
         return activities

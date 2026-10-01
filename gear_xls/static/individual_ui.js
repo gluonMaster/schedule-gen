@@ -820,7 +820,9 @@
     element.setAttribute("data-source-layer", "individual");
     var exchangeExtra = {};
     var exchangeCore = ["id", "day", "building", "room", "subject", "teacher", "students",
-      "start_time", "end_time", "lesson_type", "color", "trial_dates", "rental_dates", "start_row", "row_span"];
+      "start_time", "end_time", "lesson_type", "color", "trial_dates", "rental_dates", "start_row", "row_span",
+      "block_id", "source_layer", "duration", "group", "room_display", "trial_dates_json", "rental_dates_json",
+      "pause_before", "pause_after", "block_metadata_json", "block_metadata", "row_start", "rowspan", "col"];
     Object.keys(block).forEach(function (key) {
       if (exchangeCore.indexOf(key) === -1) exchangeExtra[key] = block[key];
     });

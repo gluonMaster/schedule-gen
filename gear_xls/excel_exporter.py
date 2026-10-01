@@ -96,6 +96,7 @@ def create_excel_from_html_data(schedule_data, output_file=None, sync_metadata=N
     validate_schedule_data_for_export(schedule_data)
     schedule_data = [normalize_exchange_record(row) for row in schedule_data]
     sync_metadata = normalize_sync_metadata(sync_metadata)
+    check_unique_block_ids(schedule_data, sync_metadata)
     
     # Если имя выходного файла не указано, создаем имя по умолчанию
     if not output_file:
@@ -223,7 +224,7 @@ def create_excel_from_html_data(schedule_data, output_file=None, sync_metadata=N
             ws.cell(row=row_idx, column=9).value = activity.get('duration', 0)
 
             lesson_type = str(activity.get('lesson_type') or 'group').strip() or 'group'
-            trial_dates_json = activity.get('trial_dates_json', '')
+            trial_dates_json = activity['trial_dates']
             if lesson_type != 'trial':
                 trial_dates_json = ''
             elif isinstance(trial_dates_json, list):
@@ -346,7 +347,7 @@ def process_schedule_export_request(request_data, output_dir="excel_exports", sy
         # Создаем Excel-файл
         return create_excel_from_html_data(schedule_data, output_file, sync_metadata=sync_metadata)
     
-    except ExcelExportValidationError:
+    except (ExcelExportValidationError, ScheduleExchangeError):
         raise
     except Exception as e:
         logger.error(f"Ошибка при обработке запроса на экспорт: {e}")
