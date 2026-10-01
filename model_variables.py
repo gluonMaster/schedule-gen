@@ -4,6 +4,7 @@ Module for creating optimization model variables.
 from ortools.sat.python import cp_model
 from datetime import datetime, timedelta
 from time_utils import pause_to_slots
+from rental_conflicts import is_rental
 
 def create_variables(optimizer):
     """Create variables for each class."""
@@ -15,6 +16,11 @@ def create_variables(optimizer):
     
     # Create variables for each class
     for idx, c in enumerate(optimizer.classes):
+        if is_rental(c):
+            if not c.day or not c.start_time or not c.main_room or c.duration <= 0:
+                raise ValueError("Rental requires a fixed day, start, room and positive duration")
+            if c.end_time and time_to_minutes(c.end_time) != time_to_minutes(c.start_time) + c.duration:
+                raise ValueError("Rental end time must match its booked duration")
         # Create variables for day assignment (if not fixed)
         if c.day:
             # If day is specified, use a constant
@@ -27,7 +33,7 @@ def create_variables(optimizer):
         # Create variables for start time assignment
         if c.start_time:
             # Проверяем, есть ли время окончания (временное окно)
-            if c.end_time:
+            if c.end_time and not is_rental(c):
                 # Для удобства переведем времена в минуты с начала дня
                 start_minutes = time_to_minutes(c.start_time)
                 end_minutes = time_to_minutes(c.end_time)

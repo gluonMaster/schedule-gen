@@ -5,6 +5,7 @@
 from conflict_detector import check_potential_conflicts
 from time_conflict_constraints import _add_time_conflict_constraints
 from time_utils import time_to_minutes
+from rental_conflicts import is_rental, teacher_resource, room_keys, rental_calendar_overlap
 
 def _in_same_linked_chain(optimizer, i: int, j: int) -> bool:
     """Return True when both class indices belong to the same linked chain."""
@@ -49,6 +50,9 @@ def add_resource_conflict_constraints(optimizer):
         for j in range(i + 1, num_classes):
             c_j = optimizer.classes[j]
 
+            if not rental_calendar_overlap(c_i, c_j, optimizer.calculation_date):
+                continue
+
             # Пропускаем сравнение только если оба дня фиксированы и различаются.
             day_i = optimizer.day_vars[i]
             day_j = optimizer.day_vars[j]
@@ -56,13 +60,14 @@ def add_resource_conflict_constraints(optimizer):
                 continue
 
             # Skip if classes are linked (already handled)
-            if hasattr(c_i, 'linked_classes') and c_j in c_i.linked_classes:
+            rental_pair = is_rental(c_i) or is_rental(c_j)
+            if not rental_pair and hasattr(c_i, 'linked_classes') and c_j in c_i.linked_classes:
                 continue
-            if hasattr(c_j, 'linked_classes') and c_i in c_j.linked_classes:
+            if not rental_pair and hasattr(c_j, 'linked_classes') and c_i in c_j.linked_classes:
                 continue
             
             # Skip all pairs within the same linked chain (already handled).
-            if _in_same_linked_chain(optimizer, i, j):
+            if not rental_pair and _in_same_linked_chain(optimizer, i, j):
                 continue
 
             # Пропускаем fixed/fixed пары, которые точно не пересекаются по времени.
@@ -76,7 +81,7 @@ def add_resource_conflict_constraints(optimizer):
             conflict_description = []
             
             # Проверка конфликта преподавателя
-            if c_i.teacher == c_j.teacher and c_i.teacher:
+            if teacher_resource(c_i) and teacher_resource(c_i) == teacher_resource(c_j):
                 # Проверяем, есть ли общие группы
                 shared_groups = set(c_i.get_groups()) & set(c_j.get_groups())
                 if shared_groups:
@@ -90,7 +95,7 @@ def add_resource_conflict_constraints(optimizer):
                     conflict_description.append(f"teacher '{c_i.teacher}' (different groups, same day)")
             
             # Проверка конфликта аудитории
-            shared_rooms = set(c_i.possible_rooms) & set(c_j.possible_rooms)
+            shared_rooms = room_keys(c_i) & room_keys(c_j)
             if shared_rooms:
                 resource_conflict = True
                 conflict_description.append(f"rooms {shared_rooms}")

@@ -3,15 +3,38 @@
 """
 
 from time_utils import time_to_minutes, minutes_to_time
+from rental_conflicts import (is_rental, teacher_resource, room_keys,
+                              rental_calendar_overlap, fixed_conflict_type)
 
 def check_potential_conflicts(optimizer):
     """Check for obvious conflicts before building the model."""
     print("\nChecking for potential scheduling conflicts...")
+    rental_conflicts = []
+    for i, first in enumerate(optimizer.classes):
+        for j in range(i + 1, len(optimizer.classes)):
+            second = optimizer.classes[j]
+            if not (is_rental(first) or is_rental(second)):
+                continue
+            if not rental_calendar_overlap(first, second, optimizer.calculation_date):
+                continue
+            if first.day and second.day and first.day != second.day:
+                continue
+            if not room_keys(first) & room_keys(second):
+                continue
+            if first.has_fixed_time and second.has_fixed_time:
+                if fixed_conflict_type(first, second, optimizer.calculation_date):
+                    if first.has_fixed_room and second.has_fixed_room:
+                        rental_conflicts.append((i, j))
+                        print(f"CONFLICT DETECTED: Rental room occupancy: classes {i}, {j}")
+                    else:
+                        print(f"Room choice required for rental pair: classes {i}, {j}")
+            else:
+                print(f"Rental room occupancy checked with chosen day/time/room: classes {i}, {j}")
     
     # Для каждого преподавателя проверяем конфликты в одно и то же время
     teachers_classes = {}
     for idx, c in enumerate(optimizer.classes):
-        if c.teacher:
+        if teacher_resource(c):
             if c.teacher not in teachers_classes:
                 teachers_classes[c.teacher] = []
             teachers_classes[c.teacher].append((idx, c))
@@ -113,6 +136,8 @@ def check_potential_conflicts(optimizer):
     print("\nChecking for room conflicts...")
     room_classes = {}
     for idx, c in enumerate(optimizer.classes):
+        if is_rental(c):
+            continue  # Rental diagnostics above use exact endpoints and active dates.
         for room in c.possible_rooms:
             if room not in room_classes:
                 room_classes[room] = []
@@ -214,4 +239,5 @@ def check_potential_conflicts(optimizer):
                             print(f"  WARNING: Not enough time in common window to schedule both classes!")
     
     print("\nConflict check completed.")
+    return rental_conflicts
     

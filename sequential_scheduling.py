@@ -5,6 +5,7 @@
 """
 
 from time_utils import time_to_minutes, minutes_to_time
+from rental_conflicts import teacher_resource
 
 def can_schedule_sequentially(c1, c2):
     """
@@ -191,7 +192,7 @@ def check_sequential_for_same_teacher(optimizer, teacher_name):
     # Находим все занятия указанного преподавателя
     teacher_class_indices = []
     for idx, c in enumerate(optimizer.classes):
-        if c.teacher == teacher_name:
+        if teacher_resource(c) and teacher_resource(c) == teacher_name:
             teacher_class_indices.append(idx)
     
     # Для каждой пары занятий проверяем возможность последовательного планирования

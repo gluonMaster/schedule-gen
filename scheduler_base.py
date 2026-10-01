@@ -2,7 +2,8 @@ from ortools.sat.python import cp_model
 import pandas as pd
 import numpy as np
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from rental_conflicts import is_rental, teacher_resource
 from typing import Dict, List, Tuple, Optional, Set, Any
 
 # Импорт из локальных модулей
@@ -14,7 +15,7 @@ class ScheduleOptimizer:
     based on the input constraints.
     """
     
-    def __init__(self, classes: List[ScheduleClass], time_interval: int = 15):
+    def __init__(self, classes: List[ScheduleClass], time_interval: int = 15, calculation_date=None):
         """
         Initialize the scheduler with the given classes and time interval.
         
@@ -24,6 +25,7 @@ class ScheduleOptimizer:
         """
         self.classes = classes
         self.time_interval = time_interval
+        self.calculation_date = calculation_date or date.today()
         
         # Primary lookup by object identity avoids collisions for similar classes.
         self.class_index = {id(c): idx for idx, c in enumerate(classes)}
@@ -32,7 +34,7 @@ class ScheduleOptimizer:
         print(f"Classes list has {len(classes)} elements.")
         
         # Extract all unique resources
-        self.teachers = sorted(set(c.teacher for c in classes if c.teacher))
+        self.teachers = sorted(set(teacher_resource(c) for c in classes if teacher_resource(c)))
         self.rooms = sorted(set(room for c in classes for room in c.possible_rooms if room))
         self.groups = sorted(set(group for c in classes for group in c.get_groups() if group))
         self.days = sorted(set(c.day for c in classes if c.day))
@@ -241,7 +243,7 @@ class ScheduleOptimizer:
                 
                 day_name = self.index_to_day.get(day, f"UNKNOWN_DAY_{day}")
                 room_name = self.rooms[room_idx]
-                start_time = self.time_slots[start_slot]
+                start_time = c.start_time if is_rental(c) else self.time_slots[start_slot]
                 
                 # Calculate end time
                 time_obj = datetime.strptime(start_time, "%H:%M")
@@ -249,7 +251,7 @@ class ScheduleOptimizer:
                 end_time = time_obj.strftime("%H:%M")
 
                 raw_lesson_type = str(getattr(c, "lesson_type", "") or "").strip().lower()
-                if raw_lesson_type in {"group", "individual", "nachhilfe", "trial"}:
+                if raw_lesson_type in {"group", "individual", "nachhilfe", "trial", "rental"}:
                     lesson_type = raw_lesson_type
                 else:
                     lesson_type = ""
@@ -278,6 +280,8 @@ class ScheduleOptimizer:
                     "pause_after": c.pause_after,
                     "lesson_type": lesson_type,
                     "trial_dates_json": trial_dates_json,
+                    "block_id": getattr(c, "block_id", ""),
+                    "rental_dates_json": json.dumps(c.rental_dates) if is_rental(c) else "",
                 })
             
         # В случае INFEASIBLE, вызвать анализ конфликтов

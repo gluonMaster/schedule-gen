@@ -5,11 +5,16 @@ from time_utils import time_to_minutes, minutes_to_time, pause_to_slots
 from time_constraint_utils import create_conflict_variables, add_time_overlap_constraints
 from sequential_scheduling_checker import check_two_window_classes
 from sequential_scheduling import can_schedule_sequentially
+from rental_conflicts import is_rental, teacher_resource, room_keys, rental_calendar_overlap
+from gear_xls.room_name_utils import normalize_room_name
 
 def add_sequential_constraints(optimizer, i, j, c_i, c_j):
     """
     Добавляет строгие ограничения для последовательного размещения занятий
     """
+    if is_rental(c_i) or is_rental(c_j):
+        add_rental_room_constraints(optimizer, i, j, c_i, c_j)
+        return
     # Создаем булеву переменную для определения порядка занятий
     i_before_j = optimizer.model.NewBoolVar(f"seq_strict_{i}_{j}")
     
@@ -44,6 +49,29 @@ def _create_same_room_var(optimizer, i, j):
     same_room = optimizer.model.NewBoolVar(f"same_room_{i}_{j}")
     room_i = optimizer.room_vars[i]
     room_j = optimizer.room_vars[j]
+    c_i, c_j = optimizer.classes[i], optimizer.classes[j]
+    if c_i.building != c_j.building:
+        optimizer.model.Add(same_room == 0)
+        return same_room
+
+    matches = [(r_i, r_j) for r_i in c_i.possible_rooms for r_j in c_j.possible_rooms
+               if normalize_room_name(r_i, c_i.building) == normalize_room_name(r_j, c_j.building)]
+    if any(r_i != r_j for r_i, r_j in matches):
+        selected_matches = []
+        for n, (r_i, r_j) in enumerate(matches):
+            selected = []
+            for side, room_var, room_name in (("i", room_i, r_i), ("j", room_j, r_j)):
+                chosen = optimizer.model.NewBoolVar(f"room_selected_{i}_{j}_{n}_{side}")
+                optimizer.model.Add(room_var == optimizer.rooms.index(room_name)).OnlyEnforceIf(chosen)
+                optimizer.model.Add(room_var != optimizer.rooms.index(room_name)).OnlyEnforceIf(chosen.Not())
+                selected.append(chosen)
+            match = optimizer.model.NewBoolVar(f"room_match_{i}_{j}_{n}")
+            optimizer.model.AddBoolAnd(selected).OnlyEnforceIf(match)
+            optimizer.model.AddBoolOr([v.Not() for v in selected]).OnlyEnforceIf(match.Not())
+            selected_matches.append(match)
+        optimizer.model.AddBoolOr(selected_matches).OnlyEnforceIf(same_room)
+        optimizer.model.AddBoolAnd([v.Not() for v in selected_matches]).OnlyEnforceIf(same_room.Not())
+        return same_room
 
     if isinstance(room_i, int) and isinstance(room_j, int):
         optimizer.model.Add(same_room == int(room_i == room_j))
@@ -99,6 +127,17 @@ def _add_conditional_room_overlap_constraint(optimizer, i, j, c_i, c_j):
     add_time_overlap_constraints(optimizer, i, j, c_i, c_j, time_overlap)
     _forbid_same_day_overlap_if_same_room(optimizer, i, j, same_day, time_overlap)
 
+
+def add_rental_room_constraints(optimizer, i, j, c_i, c_j):
+    """Room occupancy only; no teaching or sequential-window heuristics."""
+    if not room_keys(c_i) & room_keys(c_j):
+        return
+    if not rental_calendar_overlap(c_i, c_j, optimizer.calculation_date):
+        return
+    _, same_day, time_overlap = create_conflict_variables(optimizer, i, j, c_i, c_j)
+    add_time_overlap_constraints(optimizer, i, j, c_i, c_j, time_overlap)
+    _forbid_same_day_overlap_if_same_room(optimizer, i, j, same_day, time_overlap)
+
 def _add_time_conflict_constraints(optimizer, i, j, c_i, c_j):
     """
     Добавляет ограничения для предотвращения конфликтов времени между занятиями.
@@ -108,6 +147,9 @@ def _add_time_conflict_constraints(optimizer, i, j, c_i, c_j):
         i, j: Индексы классов
         c_i, c_j: Экземпляры ScheduleClass
     """
+    if is_rental(c_i) or is_rental(c_j):
+        add_rental_room_constraints(optimizer, i, j, c_i, c_j)
+        return
     # Пропускаем пару только когда оба дня фиксированы и различаются.
     day_i = optimizer.day_vars[i]
     day_j = optimizer.day_vars[j]
@@ -116,9 +158,9 @@ def _add_time_conflict_constraints(optimizer, i, j, c_i, c_j):
         return
     
     # Проверяем наличие общих аудиторий/групп и конфликта преподавателя
-    shared_rooms = set(c_i.possible_rooms) & set(c_j.possible_rooms)
+    shared_rooms = room_keys(c_i) & room_keys(c_j)
     shared_groups = set(c_i.get_groups()) & set(c_j.get_groups())
-    teacher_conflict = bool(c_i.teacher and c_i.teacher == c_j.teacher)
+    teacher_conflict = bool(teacher_resource(c_i) and teacher_resource(c_i) == teacher_resource(c_j))
 
     # Флаг для обязательного добавления ограничений при общих группах
     must_add_constraints = bool(teacher_conflict or shared_groups or shared_rooms)

@@ -9,6 +9,7 @@ from time_utils import time_to_minutes, minutes_to_time, pause_to_slots
 from sequential_scheduling_checker import check_two_window_classes
 from sequential_scheduling import can_schedule_sequentially
 from time_constraint_utils import create_conflict_variables
+from rental_conflicts import is_rental, teacher_resource
 
 def find_slot_for_time(optimizer, time_str, rounding="ceil"):
     """Thin wrapper over optimizer time-to-slot helpers."""
@@ -62,6 +63,10 @@ def add_time_separation_constraints(optimizer, idx_i, idx_j, c_i, c_j):
     Добавляет ограничения для гарантированного разделения занятий по времени
     с добавлением минимального интервала между занятиями
     """
+    if is_rental(c_i) or is_rental(c_j):
+        from time_conflict_constraints import add_rental_room_constraints
+        add_rental_room_constraints(optimizer, idx_i, idx_j, c_i, c_j)
+        return
     # Проверка на существующие ограничения между этими классами
     pair_key = (idx_i, idx_j)
     reversed_key = (idx_j, idx_i)
@@ -162,6 +167,8 @@ def analyze_related_classes(optimizer):
     
     # Группировка занятий
     for idx, c in enumerate(optimizer.classes):
+        if is_rental(c):
+            continue  # Rental pairs are constrained by selected room and active dates.
         # Группировка по группам
         for group in c.get_groups():
             if group not in classes_by_group:
@@ -169,7 +176,7 @@ def analyze_related_classes(optimizer):
             classes_by_group[group].append((idx, c))
         
         # Группировка по преподавателям
-        if c.teacher:
+        if teacher_resource(c):
             if c.teacher not in classes_by_teacher:
                 classes_by_teacher[c.teacher] = []
             classes_by_teacher[c.teacher].append((idx, c))
@@ -823,7 +830,7 @@ def apply_timewindow_improvements(optimizer):
     # Общий анализ занятий с временными окнами
     window_classes = []
     for idx, c in enumerate(optimizer.classes):
-        if c.start_time and c.end_time:
+        if c.start_time and c.end_time and not is_rental(c):
             window_classes.append((idx, c))
     
     print(f"\nFound {len(window_classes)} classes with time windows.")
@@ -870,6 +877,8 @@ def add_objective_weights_for_timewindows(optimizer):
     
     # 1. Для стандартных занятий добавляем стимул начинать как можно раньше
     for idx, c in enumerate(optimizer.classes):
+        if is_rental(c):
+            continue
         if not isinstance(optimizer.start_vars[idx], int):
             # Проверяем, не в списке ли занятий для позднего начала
             if idx not in getattr(optimizer, "prefer_late_start", set()):
@@ -878,7 +887,7 @@ def add_objective_weights_for_timewindows(optimizer):
     
     # 2. Для занятий с временными окнами 
     for idx, c in enumerate(optimizer.classes):
-        if c.start_time and c.end_time and not isinstance(optimizer.start_vars[idx], int):
+        if c.start_time and c.end_time and not is_rental(c) and not isinstance(optimizer.start_vars[idx], int):
             window_start = time_to_minutes(c.start_time)
             window_end = time_to_minutes(c.end_time)
             window_size = window_end - window_start

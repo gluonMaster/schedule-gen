@@ -2,6 +2,7 @@
 Вспомогательные функции для обработки временных ограничений.
 """
 from time_utils import time_to_minutes, minutes_to_time, pause_to_slots
+from rental_conflicts import is_rental, rental_calendar_overlap
 
 def create_conflict_variables(optimizer, i, j, c_i, c_j):
     """
@@ -20,7 +21,9 @@ def create_conflict_variables(optimizer, i, j, c_i, c_j):
     
     # Classes conflict if they're on the same day
     same_day = optimizer.model.NewBoolVar(f"same_day_{i}_{j}")
-    if isinstance(optimizer.day_vars[i], int) and isinstance(optimizer.day_vars[j], int):
+    if not rental_calendar_overlap(c_i, c_j, optimizer.calculation_date):
+        optimizer.model.Add(same_day == 0)
+    elif isinstance(optimizer.day_vars[i], int) and isinstance(optimizer.day_vars[j], int):
         # Проверяем равенство дней и устанавливаем значение переменной same_day
         if optimizer.day_vars[i] == optimizer.day_vars[j]:
             optimizer.model.Add(same_day == 1)
@@ -51,6 +54,24 @@ def add_time_overlap_constraints(optimizer, i, j, c_i, c_j, time_overlap):
         c_i, c_j: Экземпляры ScheduleClass
         time_overlap: Булева переменная для определения перекрытия времени
     """
+    if is_rental(c_i) or is_rental(c_j):
+        # Rental endpoints are exact minutes, independent of the solver grid.
+        # Lesson starts still use the existing slot domain.
+        origin = time_to_minutes(optimizer.time_slots[0])
+        start_i = (time_to_minutes(c_i.start_time) if is_rental(c_i)
+                   else origin + optimizer.start_vars[i] * optimizer.time_interval)
+        start_j = (time_to_minutes(c_j.start_time) if is_rental(c_j)
+                   else origin + optimizer.start_vars[j] * optimizer.time_interval)
+        overlap1 = optimizer.model.NewBoolVar(f"rental_overlap1_{i}_{j}")
+        overlap2 = optimizer.model.NewBoolVar(f"rental_overlap2_{i}_{j}")
+        optimizer.model.Add(start_i < start_j + c_j.duration).OnlyEnforceIf(overlap1)
+        optimizer.model.Add(start_i >= start_j + c_j.duration).OnlyEnforceIf(overlap1.Not())
+        optimizer.model.Add(start_j < start_i + c_i.duration).OnlyEnforceIf(overlap2)
+        optimizer.model.Add(start_j >= start_i + c_i.duration).OnlyEnforceIf(overlap2.Not())
+        optimizer.model.AddBoolAnd([overlap1, overlap2]).OnlyEnforceIf(time_overlap)
+        optimizer.model.AddBoolOr([overlap1.Not(), overlap2.Not()]).OnlyEnforceIf(time_overlap.Not())
+        return
+
     # Calculate the duration in time slots for each class
     duration_i_slots = (c_i.duration) // optimizer.time_interval
     duration_j_slots = (c_j.duration) // optimizer.time_interval

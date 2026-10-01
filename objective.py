@@ -3,6 +3,7 @@ Module for defining the objective function.
 """
 
 from time_utils import pause_to_slots
+from rental_conflicts import teacher_resource
 
 def add_objective_function(optimizer):
     """Define the objective function to optimize the schedule."""
@@ -16,7 +17,7 @@ def add_objective_function(optimizer):
     # Group classes by teacher and day
     teacher_day_classes = {}
     for idx, c in enumerate(optimizer.classes):
-        if not c.teacher:
+        if not teacher_resource(c):
             continue
             
         teacher = c.teacher

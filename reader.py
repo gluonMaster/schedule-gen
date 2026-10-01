@@ -64,7 +64,9 @@ class ScheduleClass:
                  section_index: int = 0,
                  column: str = "B",
                  lesson_type: str = "",
-                 trial_dates: Optional[List[str]] = None):
+                 trial_dates: Optional[List[str]] = None,
+                 rental_dates: Optional[List[str]] = None,
+                 block_id: str = ""):
         
         self.subject = _clean_text(subject)
         self.group = _clean_text(group)
@@ -83,6 +85,8 @@ class ScheduleClass:
         self.section_index = section_index
         self.column = column
         self.lesson_type = _clean_text(lesson_type).lower()
+        self.block_id = _clean_text(block_id)
+        self.rental_dates = list(rental_dates or []) if self.lesson_type == "rental" else []
         self.trial_dates = []
         if self.lesson_type == "trial" and isinstance(trial_dates, list):
             self.trial_dates = [
@@ -91,7 +95,7 @@ class ScheduleClass:
         
         # Добавляем новые атрибуты для работы с временными окнами
         self.has_time_window = False  # Этот флаг будет установлен в model_variables.py
-        self.fixed_start_time = start_time is not None and end_time is None
+        self.fixed_start_time = self.start_time is not None and (self.is_rental or self.end_time is None)
         
         # Linked classes (to be filled later)
         self.next_class = None
@@ -111,20 +115,28 @@ class ScheduleClass:
         return self.__str__()
     
     @property
+    def is_rental(self) -> bool:
+        return self.lesson_type == "rental"
+
+    @property
+    def resource_teacher(self) -> str:
+        return "" if self.is_rental else self.teacher
+
+    @property
     def possible_rooms(self) -> List[str]:
         """Return the list of all possible rooms for this class."""
-        rooms = [self.main_room] + self.alternative_rooms
+        rooms = [self.main_room] + ([] if self.is_rental else self.alternative_rooms)
         return [r for r in rooms if r]  # Filter out any None values
     
     @property
     def has_fixed_time(self) -> bool:
         """Check if the class has a fixed start time."""
-        return self.start_time is not None and self.end_time is None
+        return self.fixed_start_time
     
     @property
     def has_fixed_room(self) -> bool:
         """Check if the class must be in a specific room."""
-        return len(self.alternative_rooms) == 0
+        return self.is_rental or len(self.alternative_rooms) == 0
     
     @property
     def total_duration(self) -> int:
@@ -135,7 +147,7 @@ class ScheduleClass:
         """Extract all group names from the group field."""
         # The group field may contain multiple groups like "2A+1A Kunst"
         # Parse this to extract all group names
-        if not self.group:
+        if self.is_rental or not self.group:
             return []
             
         parts = self.group.split()
