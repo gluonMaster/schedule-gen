@@ -37,7 +37,7 @@ def records():
         {**common, 'block_id': 'dated', 'room': '1.03', 'subject': 'Verein-Treffen', 'rental_dates': ['2026-09-28', '2026-10-05', '2026-10-12']},
         {**common, 'block_id': 'past', 'room': '1.04', 'rental_dates': ['2026-09-28']},
         {**common, 'block_id': 'trial', 'room': '1.05', 'subject': 'Trial', 'lesson_type': 'trial',
-         'rental_dates': [], 'trial_dates': ['2026-10-05'], 'students': '', 'teacher': 'Teacher'},
+         'rental_dates': [], 'trial_dates': ['2026-10-05'], 'students': '', 'teacher': 'Trial Teacher'},
         {**common, 'block_id': '', 'room': '1.06', 'subject': 'Math', 'lesson_type': 'group',
          'students': '1A', 'teacher': 'Teacher'},
     ]
