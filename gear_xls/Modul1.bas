@@ -38,6 +38,8 @@ Sub CreateSchedulePlanning()
     Dim colorColumn As Long
     Dim blockMetadataColumn As Long
     Dim wsSync As Worksheet
+    Dim wsSyncTarget As Worksheet
+    Dim syncCell As Range
     
     ' Optimize performance
     Application.ScreenUpdating = False
@@ -99,8 +101,15 @@ Sub CreateSchedulePlanning()
     Set wsSync = wbSource.Worksheets("__schedule_sync")
     On Error GoTo 0
     If Not wsSync Is Nothing Then
-        wsSync.Copy After:=wsMetadata
-        wbTarget.Worksheets("__schedule_sync").Visible = xlSheetVeryHidden
+        ' Worksheet.Copy fails here (very hidden sheet without a VBA sheet module):
+        ' recreate the sheet and transfer every cell's format and value unchanged.
+        Set wsSyncTarget = wbTarget.Worksheets.Add(After:=wsMetadata)
+        wsSyncTarget.Name = "__schedule_sync"
+        For Each syncCell In wsSync.UsedRange.Cells
+            wsSyncTarget.Range(syncCell.Address).NumberFormat = syncCell.NumberFormat
+            wsSyncTarget.Range(syncCell.Address).Value = syncCell.Value
+        Next syncCell
+        wsSyncTarget.Visible = xlSheetVeryHidden
     End If
     
     ' 1. Add headers and formatting to the first row

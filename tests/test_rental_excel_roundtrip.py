@@ -334,7 +334,10 @@ def test_vba_transfer_and_both_import_paths_are_static():
     assert macro.isascii(), 'VBComponents.Import must not depend on the Windows ANSI code page'
     for column, key in enumerate(['section_index', 'column_letter', 'lesson_type', 'trial_dates_json', *RECORD_COLUMNS], 1):
         assert f'wsMetadata.Cells(1, {column}).Value = "{key}"' in macro
-    assert 'wsSync.Copy After:=wsMetadata' in macro
+    # Worksheet.Copy of the very hidden sync sheet fails in real Excel; cells are transferred instead.
+    assert 'wsSync.Copy' not in macro and 'Set wsSyncTarget = wbTarget.Worksheets.Add(After:=wsMetadata)' in macro
+    assert 'wsSyncTarget.Range(syncCell.Address).NumberFormat = syncCell.NumberFormat' in macro
+    assert 'wsSyncTarget.Visible = xlSheetVeryHidden' in macro
     assert 'wsSync = wbSource.Worksheets("__schedule_sync")' in macro
     assert 'targetRow = targetRow + 14' in macro
     assert 'wsTarget.Cells(targetRow + 11, targetColumn).Value = wsSource.Cells(i, 8).Value' in macro
