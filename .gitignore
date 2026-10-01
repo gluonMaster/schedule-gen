@@ -1,0 +1,105 @@
+# Local user/configuration data; keep dependency lists and project readmes
+gear_xls/config/
+*.txt
+*.json
+!requirements*.txt
+!Readme.txt
+!readme.txt
+gear_xls/USERS.md
+spiski/
+
+# Prompt drafts and local assistant context
+PROMPTS/
+Prompt-*.md
+.claude/
+memory/
+
+# Local/private configuration and secrets
+config.json
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.p8
+*.jks
+*.keystore
+secrets/
+credentials/
+secrets.*
+credentials.*
+
+# Local schedule data and exports
+xlsx_initial/*
+!xlsx_initial/*.bas
+excel_exports/
+gear_xls/excel_exports/
+gear_xls/html_output/
+gear_xls/schedule_state/
+gear_xls/backups/
+intermediate_states/
+group_schedules/
+teacher_schedules/
+visualiser/enhanced_schedule_visualization.html
+visualiserTV/enhanced_schedule_visualization*.html
+visualiserTV/SoftColors/
+*.pdf
+*.xlsx
+*.xlsm
+*.xls
+
+# Pipeline orchestrator state (local only)
+pipeline_state.json
+SESSION_HANDOFF.md
+VERIFY_REPORT.md
+CODEX_VERIFY_PROMPT.md
+CODEX_VERIFY_RESPONSE.md
+
+# Logs and runtime files
+logs/
+runtime/
+*.log
+*.log.*
+*.pid
+*.tmp
+*.bak
+*.backup
+~$*
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+
+# Build and packaging artifacts
+dist/
+build/
+*.egg-info/
+
+# IDE and OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini

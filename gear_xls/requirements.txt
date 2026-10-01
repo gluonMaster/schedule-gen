@@ -1,0 +1,5 @@
+pdfkit>=1.0.0
+pandas>=1.0.0
+openpyxl>=3.0.0
+bcrypt>=4.0
+pywin32>=311; platform_system == "Windows"
