@@ -22,10 +22,17 @@ from gear_xls.runtime_paths import (
 )
 from gear_xls.day_constants import DAY_TO_WEEKDAY, TRIAL_ONLY_DAYS, WEB_EDITOR_DAY_SET
 from gear_xls.lesson_type_utils import is_legacy_rental_subject, validate_rental_dates
+from gear_xls.snapshot_guard import schedule_html_revision, write_guard_error
+
+try:
+    from . import lock_manager
+except ImportError:
+    import lock_manager
 
 try:
     from .base_schedule_manager import (
         BASE_SCHEDULE_PATH,
+        _normalize_revision,
         base_has_group_lessons_in_column,
         get_base_revision,
         get_base_schedule,
@@ -35,6 +42,7 @@ try:
 except ImportError:
     from base_schedule_manager import (
         BASE_SCHEDULE_PATH,
+        _normalize_revision,
         base_has_group_lessons_in_column,
         get_base_revision,
         get_base_schedule,
@@ -316,6 +324,19 @@ _ROLE_ALLOWED_TYPES = {
 }
 
 
+class EditorWriteRejected(Exception):
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def _guard_error(state, guard, check_revision=True):
+    # Ownership and revision are compared under the same file lock as the write.
+    if guard is None:
+        return None
+    return write_guard_error(lock_manager.get_lock_status(), state.get("last_modified"), guard, check_revision)
+
+
 @dataclass
 class IndividualMutationResult:
     value: object = None
@@ -515,10 +536,13 @@ def get_individual_revision(prune_expired=True):
             return _read_individual().get("last_modified")
 
 
-def add_block(block, role):
+def add_block(block, role, guard=None):
     with _ind_mutex:
         with _locked_individual_file():
             state = _read_individual()
+            error = _guard_error(state, guard)
+            if error:
+                return _mutation_result(None, error, state, None)
             cleanup = _prune_expired_trial_blocks(state)
             new_block = _normalize_block(block)
             error = _validate_block(new_block, role)
@@ -532,10 +556,13 @@ def add_block(block, role):
             return _finish_mutation(new_block, None, state, cleanup, True)
 
 
-def update_block(block_id, updates, role):
+def update_block(block_id, updates, role, guard=None):
     with _ind_mutex:
         with _locked_individual_file():
             state = _read_individual()
+            error = _guard_error(state, guard)
+            if error:
+                return _mutation_result(None, error, state, None)
             cleanup = _prune_expired_trial_blocks(state)
             for index, block in enumerate(state["blocks"]):
                 if block.get("id") != block_id:
@@ -559,10 +586,13 @@ def update_block(block_id, updates, role):
             return _finish_mutation(None, error, state, cleanup, cleanup["removed"] > 0)
 
 
-def delete_block(block_id, role=None):
+def delete_block(block_id, role=None, guard=None):
     with _ind_mutex:
         with _locked_individual_file():
             state = _read_individual()
+            error = _guard_error(state, guard)
+            if error:
+                return _mutation_result(False, error, state, None)
             cleanup = _prune_expired_trial_blocks(state)
             target = next((b for b in state["blocks"] if b.get("id") == block_id), None)
             if target is None:
@@ -574,7 +604,7 @@ def delete_block(block_id, role=None):
             return _finish_mutation(True, None, state, cleanup, True)
 
 
-def convert_block_to_regular(block_id, role):
+def convert_block_to_regular(block_id, role, guard=None):
     try:
         from .lesson_type_utils import infer_regular_type_from_subject
     except ImportError:
@@ -583,6 +613,9 @@ def convert_block_to_regular(block_id, role):
     with _ind_mutex:
         with _locked_individual_file():
             state = _read_individual()
+            error = _guard_error(state, guard)
+            if error:
+                return _mutation_result(None, error, state, None)
             cleanup = _prune_expired_trial_blocks(state)
             for index, block in enumerate(state["blocks"]):
                 if block.get("id") != block_id:
@@ -622,22 +655,51 @@ def individual_column_has_non_trial_blocks(building, day, room):
     )
 
 
-def publish_base(blocks, published_by, expected_base_revision=None):
-    # Preserve the managed origin even if an outdated client labels it group.
+def get_individual_state_unpruned():
     with _ind_mutex:
         with _locked_individual_file():
-            managed_ids = {b.get("id") for b in _read_individual()["blocks"] if isinstance(b, dict)}
-    for block in blocks or []:
-        if (isinstance(block, dict) and block.get("lesson_type") == "group"
-                and block.get("id") and block["id"] in managed_ids):
-            raise BaseScheduleValidationError("Managed block cannot be published as group", code="MANAGED_BLOCK_IN_BASE")
-    return _publish_base(blocks, published_by, expected_base_revision)
+            return _read_individual()
 
 
-def delete_column_blocks(building, day, room):
+def get_schedule_html_revision():
+    try:
+        with open(SCHEDULE_HTML_PATH, "rb") as source:
+            return schedule_html_revision(source.read())
+    except FileNotFoundError:
+        return None
+
+
+def publish_base(blocks, published_by, expected_base_revision=None, guard=None):
+    # Individual, then base: the same lock order as a guarded editor generation.
     with _ind_mutex:
         with _locked_individual_file():
             state = _read_individual()
+            if guard is not None:
+                error = _guard_error(state, guard, check_revision=False)
+                if not error and _normalize_revision(guard.get("expected_html_revision")) != _normalize_revision(
+                        get_schedule_html_revision()):
+                    error = "SCHEDULE_HTML_CHANGED"
+                if error:
+                    raise EditorWriteRejected(error)
+            # Preserve the managed origin even if an outdated client labels it group.
+            managed_ids = {b.get("id") for b in state["blocks"] if isinstance(b, dict)}
+            for block in blocks or []:
+                if (isinstance(block, dict) and block.get("lesson_type") == "group"
+                        and block.get("id") and block["id"] in managed_ids):
+                    raise BaseScheduleValidationError("Managed block cannot be published as group", code="MANAGED_BLOCK_IN_BASE")
+            return _publish_base(blocks, published_by, expected_base_revision)
+
+
+def delete_column_blocks(building, day, room, guard=None):
+    with _ind_mutex:
+        with _locked_individual_file():
+            state = _read_individual()
+            # The revision matters only when the column deletion changes managed records.
+            changes_records = any((b.get("building"), b.get("day"), b.get("room")) == (building, day, room)
+                                  for b in state["blocks"])
+            error = _guard_error(state, guard, check_revision=changes_records)
+            if error:
+                return _mutation_result(0, error, state, None)
             cleanup = _prune_expired_trial_blocks(state)
             remaining = []
             removed = 0

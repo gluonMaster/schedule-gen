@@ -668,13 +668,23 @@
     if (publishResult && publishResult.status === 400 && code === "EXPECTED_BASE_REVISION_REQUIRED") {
       return "Не удалось опубликовать расписание: клиент не передал ревизию базового расписания. Обновите страницу.";
     }
+    if (publishResult && publishResult.status === 403 && code === "STALE_LOCK") {
+      if (window.SchedGenLockUI && typeof window.SchedGenLockUI.resyncAfterStaleLock === "function") {
+        window.SchedGenLockUI.resyncAfterStaleLock();
+      }
+    }
     return error;
   }
 
   function publishCollectedBlocks(blocks) {
+    var lockUi = window.SchedGenLockUI;
+
+    // The page (generated HTML) and the lock it publishes from must still be current.
     return requestJson("/api/schedule/publish", "POST", {
       blocks: blocks,
       expected_base_revision: _baseRevision,
+      expected_html_revision: window.SCHEDULE_HTML_REVISION || null,
+      lock_version: lockUi && typeof lockUi.getLockVersion === "function" ? lockUi.getLockVersion() : null,
     }).then(function (publishResult) {
       var error;
 

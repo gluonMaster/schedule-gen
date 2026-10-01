@@ -121,6 +121,7 @@ load('static/individual_ui.js', { individualTest: [
 context.SchedGenIndividualUI = { enhanceCreateDialog: context.individualTest.enhanceCreateDialog };
 load('static/base_sync_ui.js', { baseTest: ['collectBlocksForPublish', 'buildScheduleSnapshotFromDom', 'isGroupBlockElement', 'normalizeBlocksForSignature'] });
 load('js_modules/editing_update.js');
+if (process.argv.includes('--sync-only')) load('static/lock_ui.js', { lockTest: ['acquireLock'] });
 let conflictSource = fs.readFileSync(path.join(root, 'gear_xls/js_modules/conflict_detector.js'), 'utf8').replace(/\r\n/g, '\n');
 conflictSource = conflictSource.replace('    ensureStyles();\n\n    return {', '    window.conflictTest = { parseBlock };\n    ensureStyles();\n\n    return {');
 // Read the conflict payload; highlighting belongs to phase 2.
@@ -166,7 +167,94 @@ function event(target) { return { target, preventDefault() {}, stopPropagation()
 function current() { return container.querySelector('[data-block-id="rental-stable"]'); }
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
+// Phase 4: lock acquisition resyncs first; a stale form is neither applied nor retried.
+async function syncScenario() {
+    let editMode = false;
+    Object.assign(context.SchedGenAuthUI, {
+        isEditMode: () => editMode, setEditMode: value => { editMode = !!value; },
+        setNavEditorState() {}, currentUser: () => 'organizer_one', currentRole: () => 'organizer',
+    });
+    Object.assign(context, { setInterval: () => 1, clearInterval() {}, SCHEDULE_HTML_REVISION: 'page-1' });
+    document.documentElement = new Element('html');
+    context.SchedGenIndividualUI.refreshIndividualLayer = data => { api.applyIndividualState(data); return Promise.resolve(data); };
+    const server = { revision: 'rev-1', room: '0.06', html: 'page-1', scheduleStatus: 200 };
+    const calls = [];
+    const stored = () => ({ id: 'rental-stable', building: 'Villa', day: 'Mo', room: server.room, subject: 'Vermietung',
+        teacher: '', students: 'Verein', lesson_type: 'rental', start_time: '10:00', end_time: '11:00', rental_dates: [] });
+    context.fetch = async (url, options = {}) => {
+        const method = options.method || 'GET';
+        const payload = options.body ? JSON.parse(options.body) : undefined;
+        calls.push({ call: method + ' ' + url, payload, editMode });
+        if (method === 'POST' && url === '/api/blocks') throw new TypeError('network down');
+        let status = 200, data = { ok: true };
+        if (url === '/api/lock/acquire') data = { ok: true, version: 7 };
+        if (url === '/api/lock/status') data = { holder: null, version: 8 };
+        if (url === '/api/schedule') {
+            status = server.scheduleStatus;
+            data = { base: [], individual: [stored()], base_revision: null, published_base_available: false,
+                individual_revision: server.revision, schedule_html_revision: server.html };
+        }
+        if (method === 'PUT') {
+            if (payload.expected_individual_revision !== server.revision) {
+                status = 409;
+                data = { ok: false, code: 'INDIVIDUAL_REVISION_CONFLICT', error: 'conflict',
+                    force_individual_refresh: true, individual_revision: server.revision };
+            } else {
+                server.room = payload.room; server.revision = 'rev-saved';
+                data = { ok: true, block: stored(), individual_revision: server.revision };
+            }
+        }
+        return { ok: status < 400, status, text: async () => JSON.stringify(data) };
+    };
+    const settle = async () => { for (let i = 0; i < 10; i++) await tick(); };
+    const editFields = room => ({ 'edit-building': 'Villa', 'edit-room': room, 'edit-subject': 'Vermietung',
+        'edit-teacher': '', 'edit-students': 'Verein', 'edit-time': '12:00-13:00' });
+
+    for (const [setup, message] of [[() => { server.scheduleStatus = 500; }, /синхронизировать/],
+        [() => { server.scheduleStatus = 200; server.html = 'page-2'; }, /перегенерировано/]]) {
+        setup(); calls.length = 0; alerts.length = 0;
+        context.lockTest.acquireLock(); await settle();
+        assert.equal(editMode, false);
+        assert.deepEqual(calls.slice(0, 3).map(c => c.call), ['POST /api/lock/acquire', 'GET /api/schedule', 'POST /api/lock/release']);
+        assert.equal(calls[2].payload.version, 7); assert.match(alerts[0], message);
+    }
+    Object.assign(server, { html: 'page-1', revision: 'rev-2', room: '0.08' }); calls.length = 0; alerts.length = 0;
+    context.lockTest.acquireLock(); await settle();
+    assert.equal(editMode, true); assert.equal(calls[1].call, 'GET /api/schedule'); assert.equal(calls[1].editMode, false);
+    assert.equal(context.SchedGenLockUI.getLockVersion(), 7);
+    assert(current().innerHTML.includes('0.08'));
+
+    const stale = form('edit-form', editFields('0.06'));
+    api.bindEditFormToBlock(current());
+    Object.assign(server, { revision: 'rev-3', room: '0.09' });  // saved elsewhere after the form opened
+    for (let attempt = 0; attempt < 2; attempt++) {
+        calls.length = 0;
+        api.interceptEditSubmit(event(stale)); await settle();
+        assert.deepEqual(calls.map(c => c.call), ['PUT /api/blocks/rental-stable', 'GET /api/schedule']);
+        assert.equal(calls[0].payload.expected_individual_revision, 'rev-2'); assert.equal(calls[0].payload.lock_version, 7);
+        assert.match(alerts.at(-1), /после открытия формы/);
+        assert(stale.parentNode); assert.equal(stale.querySelector('#edit-room').value, '0.06');
+        assert.equal(server.room, '0.09');
+    }
+    stale.remove();
+    const reopened = form('edit-form', editFields('0.09'));
+    api.bindEditFormToBlock(current()); calls.length = 0;
+    api.interceptEditSubmit(event(reopened)); await settle(); reopened.remove();
+    assert.equal(calls[0].payload.expected_individual_revision, 'rev-3'); assert.equal(server.revision, 'rev-saved');
+
+    calls.length = 0;
+    api.interceptCreateSubmit(event(createForm)); await settle();
+    assert.deepEqual(calls.map(c => c.call), ['POST /api/blocks']);
+    assert.equal(calls[0].payload.lock_version, 7); assert.equal(calls[0].payload.expected_individual_revision, 'rev-saved');
+    assert.match(alerts.at(-1), /ошибки сети/);
+    console.log(`Lock resync and stale form handling passed (${((performance.now() - started) / 1000).toFixed(3)}s)`);
+}
+
 async function run() {
+    if (process.argv.includes('--sync-only')) {
+        await syncScenario();
+        return;
+    }
     if (process.argv.includes('--exchange-only')) {
         api.applyIndividualState({ individual_revision: 'snapshot-revision', individual: [{
             id: 'rental-stable', building: 'Villa', day: 'Mo', room: '1.01',

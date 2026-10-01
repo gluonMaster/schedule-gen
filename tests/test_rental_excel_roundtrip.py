@@ -129,6 +129,11 @@ def test_python_workbook_boundaries_and_editor_output(tmp_path, monkeypatch):
     assert "data-lesson-type='group'" in html
     assert 'block_metadata_json' in html  # current inline exporter was delivered
     monkeypatch.setattr(integration, 'get_schedule_state_dir', lambda: str(tmp_path / 'state'))
+    # Phase 4 applies a snapshot only to the state it was exported from.
+    (tmp_path / 'state').mkdir()
+    (tmp_path / 'state/base_schedule.json').write_text(json.dumps({'published_at': 'base-old', 'blocks': []}), encoding='utf-8')
+    (tmp_path / 'state/individual_lessons.json').write_text(json.dumps({'last_modified': None, 'blocks': [
+        {'id': row['id']} for row in result['individual_blocks']]}), encoding='utf-8')
     integration.reset_web_editor_state(result['individual_blocks'], sync_metadata=result['sync_metadata'])
     state = json.loads((tmp_path / 'state/individual_lessons.json').read_text(encoding='utf-8'))
     assert state['blocks'] == result['individual_blocks']
@@ -302,14 +307,18 @@ def test_rental_class_only_html_is_removed():
 
 
 def test_export_api_preserves_supplied_revisions_and_legacy_origin(isolated_editor, tmp_path, monkeypatch):
-    routes, *_ = isolated_editor
+    routes, ind_path, base_path = isolated_editor
     monkeypatch.setattr(routes, 'EXCEL_EXPORTS_DIR', str(tmp_path / 'exports'))
+    # Phase 4 labels only a payload whose revisions and managed IDs match the server.
+    base_path.write_text(json.dumps({'published_at': 'base-old', 'blocks': []}), encoding='utf-8')
+    ind_path.write_text(json.dumps({'last_modified': None, 'blocks': [
+        {'id': row['block_id']} for row in records() if row['block_id']]}), encoding='utf-8')
     with routes.app.test_client() as client:
         login(client, 'admin')
         for sync in (SYNC, None):
             form = {'schedule_data': json.dumps(records())}
             if sync is not None:
-                form['schedule_sync'] = json.dumps(sync)
+                form.update(schedule_sync=json.dumps(sync), schedule_html_revision='')
             response = client.post('/export_to_excel', data=form)
             assert response.status_code == 200
             from io import BytesIO

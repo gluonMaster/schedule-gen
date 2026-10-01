@@ -368,7 +368,10 @@ def test_mutation_api_response_reports_cleanup_removed(tmp_path, monkeypatch):
 
     with server_routes.app.test_client() as client:
         _login_admin(client)
-        response = client.post("/api/blocks", json=_regular_block(block_id="new-regular", day="Di"))
+        response = client.post("/api/blocks", json={
+            **_regular_block(block_id="new-regular", day="Di"),
+            "expected_individual_revision": "2026-05-01T00:00:00", "lock_version": 1,
+        })
 
     body = response.get_json()
     persisted = _read_individual_file(path)
@@ -396,7 +399,9 @@ def test_update_api_reports_when_target_was_pruned_by_cleanup(tmp_path, monkeypa
 
     with server_routes.app.test_client() as client:
         _login_admin(client)
-        response = client.put("/api/blocks/trial-1", json={"subject": "Updated"})
+        response = client.put("/api/blocks/trial-1", json={
+            "subject": "Updated", "expected_individual_revision": "2026-05-01T00:00:00", "lock_version": 1,
+        })
 
     body = response.get_json()
     persisted = _read_individual_file(path)

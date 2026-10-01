@@ -61,7 +61,8 @@ async function sendExport(data, freshBlocks, rejectRefresh = false) {
                 this.status = 200; this.responseText = JSON.stringify(data); this.onload();
             } else {
                 const form = new URLSearchParams(body);
-                posts.push({ records: JSON.parse(form.get('schedule_data')), sync: form.has('schedule_sync') ? JSON.parse(form.get('schedule_sync')) : null });
+                posts.push({ records: JSON.parse(form.get('schedule_data')), sync: form.has('schedule_sync') ? JSON.parse(form.get('schedule_sync')) : null,
+                    html: form.get('schedule_html_revision') });
                 this.onerror(); // Stop after outbound serialization, without real network/download.
             }
         }
@@ -73,12 +74,14 @@ async function sendExport(data, freshBlocks, rejectRefresh = false) {
 }
 
 (async () => {
+    context.SCHEDULE_HTML_REVISION = 'page-revision';
     blocks = [booking('obsolete', '1.01')];
     const fresh = [booking('00017', '1.01'), booking('other-room', '1.02', ['2026-09-28', '2026-10-05'])];
     let result = await sendExport({ blocks: [], last_modified: 'individual-applied', base_revision: 'server-unapplied' }, fresh);
     assert.equal(result.posts.length, 1);
     assert.deepEqual(result.posts[0].sync, { format_version: 1, source_base_revision: 'base-applied', source_individual_revision: 'individual-applied', snapshot_scope: 'full' });
     assert.deepEqual(result.posts[0].records.map(row => row.block_id), ['00017', 'other-room']);
+    assert.equal(result.posts[0].html, 'page-revision', 'phase 4: the server confirms the exported page');
     for (const row of result.posts[0].records) {
         assert.equal(row.lesson_type, 'rental'); assert.equal(row.teacher, ''); assert.equal(row.students, '');
         assert.equal(JSON.parse(row.block_metadata_json).notes, 'ä & <>');

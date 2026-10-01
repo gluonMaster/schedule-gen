@@ -187,6 +187,27 @@
       });
   }
 
+  // Every managed-layer write names the revision it was based on and the lock it holds.
+  function withWriteGuard(payload, expectedRevision) {
+    var lockUi = window.SchedGenLockUI;
+    var guarded = {};
+
+    Object.keys(payload || {}).forEach(function (key) {
+      guarded[key] = payload[key];
+    });
+    guarded.expected_individual_revision =
+      typeof expectedRevision === "undefined" ? individualRevision : expectedRevision;
+    guarded.lock_version =
+      lockUi && typeof lockUi.getLockVersion === "function" ? lockUi.getLockVersion() : null;
+    return guarded;
+  }
+
+  function formExpectedRevision(form) {
+    return form && "__expectedIndividualRevision" in form
+      ? form.__expectedIndividualRevision
+      : individualRevision;
+  }
+
   function responseRequiresIndividualRefresh(data) {
     return !!(
       data &&
@@ -1247,6 +1268,7 @@
     blockId = block.getAttribute("data-block-id") || "";
     form.setAttribute("autocomplete", "off");
     form.__editedBlock = block;
+    form.__expectedIndividualRevision = individualRevision;
     if (blockId) {
       form.setAttribute("data-block-id", blockId);
     } else {
@@ -1411,7 +1433,7 @@
       return;
     }
 
-    requestJson("/api/blocks/" + encodeURIComponent(blockId), "PUT", payload).then(
+    requestJson("/api/blocks/" + encodeURIComponent(blockId), "PUT", withWriteGuard(payload)).then(
       function (result) {
         if (!result) {
           restoreBlockSnapshot(block, snapshot);
@@ -1422,7 +1444,8 @@
           restoreBlockSnapshot(block, snapshot);
           handleMutationError(
             result,
-            "Недостаточно прав для изменения этого типа занятия."
+            "Недостаточно прав для изменения этого типа занятия.",
+            "Занятие изменено на сервере. Перемещение не сохранено, расписание обновлено."
           );
           return;
         }
@@ -1559,13 +1582,18 @@
       return;
     }
 
-    requestJson("/api/blocks", "POST", payload).then(function (result) {
+    requestJson("/api/blocks", "POST", withWriteGuard(payload)).then(function (result) {
       if (!result) {
         alert("Не удалось создать занятие из-за ошибки сети.");
         return;
       }
       if (!result.ok) {
-        handleMutationError(result, "Недостаточно прав для создания этого типа занятия.");
+        handleMutationError(
+          result,
+          "Недостаточно прав для создания этого типа занятия.",
+          "Индивидуальные занятия изменились на сервере. Запись не создана, данные формы сохранены. " +
+            "Расписание обновлено: проверьте, нет ли уже такой записи, и при необходимости сохраните снова."
+        );
         return;
       }
       if (resultRequiresIndividualRefresh(result)) {
@@ -1633,14 +1661,24 @@
       return;
     }
 
-    requestJson("/api/blocks/" + encodeURIComponent(blockId), "PUT", payload).then(
+    requestJson(
+      "/api/blocks/" + encodeURIComponent(blockId),
+      "PUT",
+      withWriteGuard(payload, formExpectedRevision(form))
+    ).then(
       function (result) {
         if (!result) {
           alert("Не удалось обновить занятие из-за ошибки сети.");
           return;
         }
         if (!result.ok) {
-          handleMutationError(result, "Недостаточно прав для изменения этого типа занятия.");
+          // The form keeps its input and its original revision: no silent overwrite on resubmit.
+          handleMutationError(
+            result,
+            "Недостаточно прав для изменения этого типа занятия.",
+            "Занятие изменено на сервере после открытия формы. Изменения не сохранены, ваш ввод остаётся в форме. " +
+              "Закройте форму, откройте занятие заново и повторите изменение."
+          );
           return;
         }
         if (resultRequiresIndividualRefresh(result)) {
@@ -1726,14 +1764,18 @@
       return;
     }
 
-    requestJson("/api/blocks/" + encodeURIComponent(blockId), "DELETE").then(
+    requestJson("/api/blocks/" + encodeURIComponent(blockId), "DELETE", withWriteGuard({})).then(
       function (result) {
         if (!result) {
           alert("Не удалось удалить занятие из-за ошибки сети.");
           return;
         }
         if (!result.ok) {
-          handleMutationError(result, "Недостаточно прав для удаления этого типа занятия.");
+          handleMutationError(
+            result,
+            "Недостаточно прав для удаления этого типа занятия.",
+            "Индивидуальные занятия изменились на сервере. Занятие не удалено, расписание обновлено: проверьте и повторите при необходимости."
+          );
           return;
         }
         if (refreshIndividualLayerForCleanup(result)) {
@@ -1900,17 +1942,21 @@
       return;
     }
 
-    requestJson("/api/columns", "DELETE", {
+    requestJson("/api/columns", "DELETE", withWriteGuard({
       building: building,
       day: day,
       room: room,
-    }).then(function (result) {
+    })).then(function (result) {
       if (!result) {
         alert("Не удалось удалить колонку из-за ошибки сети.");
         return;
       }
       if (!result.ok) {
-        handleMutationError(result, "Недостаточно прав для удаления колонки.");
+        handleMutationError(
+          result,
+          "Недостаточно прав для удаления колонки.",
+          "Индивидуальные занятия изменились на сервере. Колонка не удалена, расписание обновлено: проверьте и повторите."
+        );
         return;
       }
       if (resultRequiresIndividualRefresh(result)) {
@@ -2108,10 +2154,22 @@
     return null;
   }
 
-  function handleMutationError(result, forbiddenMessage) {
+  function handleMutationError(result, forbiddenMessage, conflictMessage) {
     var code = result.data && result.data.code;
     refreshIndividualLayerForCleanup(result);
     var error = (result.data && result.data.error) || "Ошибка сервера";
+
+    if (result.status === 409 && code === "INDIVIDUAL_REVISION_CONFLICT") {
+      alert(conflictMessage || error);
+      return;
+    }
+    if (result.status === 403 && code === "STALE_LOCK") {
+      alert(error);
+      if (window.SchedGenLockUI && typeof window.SchedGenLockUI.resyncAfterStaleLock === "function") {
+        window.SchedGenLockUI.resyncAfterStaleLock();
+      }
+      return;
+    }
 
     if (result.status === 403 && code === "NO_LOCK") {
       alert(

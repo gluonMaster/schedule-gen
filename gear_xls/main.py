@@ -12,10 +12,15 @@ import os
 import threading
 import webbrowser
 
+# Модули обмена Excel импортируются как gear_xls.*; локальные модули gear_xls остаются первыми.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
 # Импортируем новый сервис пайплайна
 from services.schedule_pipeline import SchedulePipeline, SchedulePipelineError
 from utils import create_output_directories
-from integration import load_spiski_data, reset_web_editor_state, check_excel_generation_origin
+from integration import load_spiski_data, generate_editor_from_excel
 
 # Глобальная переменная для выбранного файла
 selected_file = None
@@ -52,7 +57,7 @@ def run_script():
         return
     
     # Создаем директории для выходных файлов
-    output_dirs = create_output_directories()
+    create_output_directories()
     
     # Создаем экземпляр пайплайна с настройками
     pipeline = SchedulePipeline(
@@ -63,9 +68,8 @@ def run_script():
     try:
         # Выполняем основную обработку через пайплайн
         spiski_data = load_spiski_data()
-        check_excel_generation_origin(selected_file)
-        result = pipeline.process_excel_to_outputs(selected_file, output_dirs, spiski_data=spiski_data)
-        reset_web_editor_state(result.get("individual_blocks"), sync_metadata=result.get("sync_metadata"))
+        # Готовится во временном каталоге и применяется только к актуальному снимку.
+        result = generate_editor_from_excel(selected_file, pipeline, spiski_data=spiski_data)
         print(f"Обработка завершена:")
         print(f"  - Занятий обработано: {result['activities_count']}")
         print(f"  - Зданий создано: {result['buildings_count']}")

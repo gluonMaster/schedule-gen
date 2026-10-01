@@ -552,6 +552,11 @@ function exportScheduleToExcel(onDone, options) {
                                 hideExportProgress();
                             }
                         }, 2000);
+                    } else if (xhr.status === 409) {
+                        hideExportProgress();
+                        alert('Экспорт отменён: состояние расписания на сервере изменилось или страница устарела. ' +
+                              'Обновите страницу и повторите экспорт.');
+                        _callDone();
                     } else {
                         console.error('Ошибка при получении файла:', xhr.status, xhr.statusText);
                         hideExportProgress();
@@ -580,7 +585,8 @@ function exportScheduleToExcel(onDone, options) {
                 // Формируем данные запроса
                 var formData = 'schedule_data=' + encodeURIComponent(JSON.stringify(scheduleData)) + 
                               '&csrf_token=' + encodeURIComponent(csrfToken) +
-                              (snapshotMetadata ? '&schedule_sync=' + encodeURIComponent(JSON.stringify(snapshotMetadata)) : '');
+                              (snapshotMetadata ? '&schedule_sync=' + encodeURIComponent(JSON.stringify(snapshotMetadata)) +
+                                  '&schedule_html_revision=' + encodeURIComponent(window.SCHEDULE_HTML_REVISION || '') : '');
                 
                 // Отправляем запрос
                 xhr.send(formData);

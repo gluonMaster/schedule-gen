@@ -15,10 +15,14 @@ import re
 import json
 import tempfile
 import sys
-import uuid
 import openpyxl
-from datetime import datetime, timezone
 from pathlib import Path
+
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(THIS_DIR)
+if PROJECT_ROOT not in sys.path:
+    # The pipeline imports gear_xls.* exchange modules; local gear_xls modules stay first.
+    sys.path.append(PROJECT_ROOT)
 
 # Импортируем новый сервис пайплайна
 try:
@@ -28,20 +32,16 @@ except ImportError:
     from services.schedule_pipeline import SchedulePipeline, SchedulePipelineError
     from utils import create_output_directories
 
-THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(THIS_DIR)
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
 from gear_xls.runtime_paths import (
     get_excel_exports_dir,
     get_html_output_dir,
     get_js_modules_dir,
-    get_lock_json_path,
+    get_schedule_html_path,
     get_schedule_state_dir,
     get_spiski_dir,
 )
-from gear_xls.schedule_exchange import read_sync_metadata, normalize_sync_metadata
+from gear_xls.schedule_exchange import ScheduleExchangeError, read_sync_metadata
+from gear_xls.snapshot_guard import SnapshotConflictError, apply_generated_state, check_snapshot_current
 
 # Настройка логирования
 logging.basicConfig(
@@ -111,103 +111,57 @@ def load_spiski_data() -> dict:
     return result
 
 
-def _write_json_atomic(path: str, payload: dict) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=os.path.dirname(path),
-            delete=False,
-            suffix=".tmp",
-            mode="w",
-            encoding="utf-8",
-        ) as tmp:
-            json.dump(payload, tmp, ensure_ascii=False, indent=2)
-            tmp_path = tmp.name
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-
 def check_generation_origin(sync_metadata):
-    """Legacy primary imports may initialize empty state, never replace live data.
-
-    Full revision/lock checks and coordinated application belong to phase 4.
-    """
-    sync_metadata = normalize_sync_metadata(sync_metadata)
-    if sync_metadata is not None:
-        if sync_metadata['snapshot_scope'] != 'full':
-            raise SchedulePipelineError("Частичный Excel-снимок не может заменять состояние редактора.")
-        return
-    state_dir = get_schedule_state_dir()
-    for filename in ('base_schedule.json', 'individual_lessons.json'):
-        path = os.path.join(state_dir, filename)
-        if os.path.exists(path):
-            with open(path, encoding='utf-8') as source:
-                state = json.load(source)
-            if state.get('blocks') or state.get('last_modified') or state.get('published_at'):
-                raise SchedulePipelineError(
-                    "Excel без метаданных исходного снимка допустим только для первичного импорта "
-                    "в пустое состояние. Сначала создайте актуальный экспорт."
-                )
+    """Early provenance check; apply_generated_state repeats it under the state locks."""
+    try:
+        check_snapshot_current(sync_metadata, get_schedule_state_dir())
+    except (SnapshotConflictError, ScheduleExchangeError) as exc:
+        raise SchedulePipelineError(str(exc)) from exc
 
 
 def check_excel_generation_origin(excel_path):
     workbook = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
     try:
-        check_generation_origin(read_sync_metadata(workbook))
+        metadata = read_sync_metadata(workbook)
+    except ScheduleExchangeError as exc:
+        raise SchedulePipelineError(str(exc)) from exc
     finally:
         workbook.close()
+    check_generation_origin(metadata)
 
 
-def reset_web_editor_state(individual_blocks: list[dict] | None = None, sync_metadata=None) -> None:
+def reset_web_editor_state(individual_blocks: list[dict] | None = None, sync_metadata=None,
+                           html_source: str | None = None) -> None:
     """
-    Reset runtime state of the web editor so a newly generated app starts
-    from the current Excel/HTML outputs instead of stale persisted JSON state.
+    Apply a generated editor (managed JSON and, if given, prepared HTML) to the
+    runtime state. Refuses stale/legacy snapshots for live data, restores the
+    previous files on a failed write and leaves the edit lock untouched.
     """
-    state_dir = get_schedule_state_dir()
-    check_generation_origin(sync_metadata)
+    try:
+        apply_generated_state(
+            individual_blocks, sync_metadata, get_schedule_state_dir(),
+            html_source=html_source,
+            html_target=get_schedule_html_path() if html_source else None,
+        )
+    except (SnapshotConflictError, ScheduleExchangeError) as exc:
+        raise SchedulePipelineError(str(exc)) from exc
+    logger.info("Web editor runtime state applied in %s", get_schedule_state_dir())
 
-    individual_blocks = [dict(block) for block in (individual_blocks or [])]
-    seen_ids = set()
-    for block in individual_blocks:
-        if not block.get('id'):
-            if sync_metadata is not None:
-                raise SchedulePipelineError("Управляемая запись снимка не содержит block_id")
-            block['id'] = str(uuid.uuid4())
-        if block['id'] in seen_ids:
-            raise SchedulePipelineError(f"Duplicate block_id: {block['id']}")
-        seen_ids.add(block['id'])
 
-    _write_json_atomic(
-        os.path.join(state_dir, "base_schedule.json"),
-        {"published_at": None, "published_by": None, "blocks": []},
-    )
-    _write_json_atomic(
-        os.path.join(state_dir, "individual_lessons.json"),
-        {
-            "last_modified": datetime.now(timezone.utc).isoformat() if individual_blocks else None,
-            "blocks": individual_blocks,
-        },
-    )
-    _write_json_atomic(
-        os.path.join(state_dir, "lock.json"),
-        {
-            "holder": None,
-            "version": 0,
-            "acquired_at": None,
-            "last_heartbeat": None,
-            "last_holder": None,
-            "released_at": None,
-            "released_by": None,
-            "release_reason": None,
-        },
-    )
-    logger.info("Web editor runtime state reset in %s", state_dir)
+def generate_editor_from_excel(excel_file_path: str, pipeline, spiski_data=None) -> dict:
+    """Build the editor outside working outputs, then apply HTML/JSON under the state locks."""
+    check_excel_generation_origin(excel_file_path)
+    with tempfile.TemporaryDirectory(prefix="schedgen_editor_") as prepared_dir:
+        result = pipeline.process_excel_to_outputs(
+            excel_file_path, {"html": prepared_dir}, spiski_data=spiski_data
+        )
+        reset_web_editor_state(
+            result.get("individual_blocks"),
+            sync_metadata=result.get("sync_metadata"),
+            html_source=result["html_file"],
+        )
+    result["html_file"] = get_schedule_html_path()
+    return result
 
 
 def setup_environment():
@@ -332,7 +286,7 @@ def run_full_pipeline(excel_file_path: str,                     time_interval: i
             return False
         
         # Создаем директории для выходных файлов
-        output_dirs = create_output_directories()
+        create_output_directories()
         
         # Создаем экземпляр пайплайна с указанными настройками
         pipeline = SchedulePipeline(
@@ -345,9 +299,7 @@ def run_full_pipeline(excel_file_path: str,                     time_interval: i
         
         # Выполняем основную обработку
         logger.info("Запуск обработки через SchedulePipeline...")
-        check_excel_generation_origin(excel_file_path)
-        result = pipeline.process_excel_to_outputs(excel_file_path, output_dirs, spiski_data=spiski_data)
-        reset_web_editor_state(result.get("individual_blocks"), sync_metadata=result.get("sync_metadata"))
+        result = generate_editor_from_excel(excel_file_path, pipeline, spiski_data=spiski_data)
         logger.info("Обработка завершена успешно:")
         logger.info(f"  - Входной файл: {excel_file_path}")
         logger.info(f"  - Занятий обработано: {result['activities_count']}")

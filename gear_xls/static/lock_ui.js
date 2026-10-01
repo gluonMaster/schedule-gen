@@ -6,6 +6,8 @@
   var pollingTimer = null;
   var currentLockHolder = null;
   var sessionExpiredHandled = false;
+  var editSyncPromise = null;
+  var lastPassiveSyncProblem = null;
 
   function authUi() {
     return window.SchedGenAuthUI;
@@ -204,9 +206,11 @@
       lockState.version !== null
     ) {
       lockVersion = lockState.version;
-      authUi().setEditMode(true);
       if (heartbeatTimer === null) {
         startHeartbeat();
+      }
+      if (!authUi().isEditMode()) {
+        enterEditModeAfterSync(lockState.version, false);
       }
     } else if (holder !== currentUser()) {
       stopHeartbeat();
@@ -232,7 +236,9 @@
 
     if (holder === currentUser()) {
       navState.mode = "self";
-      navState.message = "Режим редактирования: вы";
+      navState.message = authUi().isEditMode()
+        ? "Режим редактирования: вы"
+        : "Синхронизация перед редактированием...";
       navState.buttons.push({
         label: "Завершить редактирование",
         onClick: releaseLock,
@@ -269,8 +275,6 @@
     }
 
     apiRequest("/api/lock/acquire", "POST", {}).then(function (result) {
-      var now;
-
       if (!result) {
         return;
       }
@@ -283,17 +287,89 @@
         return;
       }
 
-      now = new Date().toISOString();
       lockVersion = result.data.version;
-      authUi().setEditMode(true);
+      currentLockHolder = currentUser();
       startHeartbeat();
+      enterEditModeAfterSync(result.data.version, true);
+    });
+  }
+
+  // Editing starts only on the current server layers of the page that is actually open.
+  function syncEditorStateForLock() {
+    return apiRequest("/api/schedule").then(function (result) {
+      var data = result && result.data;
+      var individualUi = window.SchedGenIndividualUI;
+
+      if (
+        !result ||
+        !result.response.ok ||
+        !data ||
+        !Array.isArray(data.individual) ||
+        !individualUi ||
+        typeof individualUi.refreshIndividualLayer !== "function"
+      ) {
+        return "Не удалось синхронизировать расписание с сервером. Редактирование не начато: повторите попытку или обновите страницу.";
+      }
+      if (
+        "SCHEDULE_HTML_REVISION" in window &&
+        (data.schedule_html_revision || null) !== (window.SCHEDULE_HTML_REVISION || null)
+      ) {
+        return "Расписание на сервере было перегенерировано или восстановлено после открытия страницы. Обновите страницу (F5) и начните редактирование снова.";
+      }
+      return Promise.resolve(individualUi.refreshIndividualLayer(data)).then(
+        function () {
+          return null;
+        },
+        function () {
+          return "Не удалось применить актуальное расписание. Редактирование не начато.";
+        }
+      );
+    });
+  }
+
+  function enterEditModeAfterSync(version, acquiredHere) {
+    if (editSyncPromise) {
+      return editSyncPromise;
+    }
+    editSyncPromise = syncEditorStateForLock().then(function (problem) {
+      var now = new Date().toISOString();
+
+      editSyncPromise = null;
+      if (lockVersion !== version) {
+        return false;
+      }
+      if (problem) {
+        if (acquiredHere) {
+          stopHeartbeat();
+          lockVersion = null;
+          apiRequest("/api/lock/release", "POST", { version: version }).then(refreshLockStatus);
+          window.alert(problem);
+        } else if (problem !== lastPassiveSyncProblem) {
+          // Status polling retries the sync; the reason is shown once.
+          lastPassiveSyncProblem = problem;
+          window.alert(problem);
+        }
+        return false;
+      }
+      lastPassiveSyncProblem = null;
+      authUi().setEditMode(true);
       updateLockBanner({
         holder: currentUser(),
-        version: result.data.version,
+        version: version,
         acquired_at: now,
         last_heartbeat: now,
       });
+      return true;
     });
+    return editSyncPromise;
+  }
+
+  // A request was rejected for an outdated lock version: leave edit mode and resync.
+  function resyncAfterStaleLock() {
+    stopHeartbeat();
+    lockVersion = null;
+    authUi().setEditMode(false);
+    refreshLockStatus();
   }
 
   function releaseLock() {
@@ -511,6 +587,10 @@
   window.SchedGenLockUI = {
     clearLocalLockStateForRestore: clearLocalLockStateForRestore,
     closeOpenDialogs: closeOpenDialogs,
+    getLockVersion: function () {
+      return lockVersion;
+    },
+    resyncAfterStaleLock: resyncAfterStaleLock,
     handleSessionExpired: handleSessionExpired,
     refreshLockStatus: refreshLockStatus,
   };

@@ -56,19 +56,26 @@ def login(client, role):
         session.update(login="operator", display_name="Test", role=role)
 
 
+def guard(ind_path, **payload):
+    """Phase 4 markers of a managed write: current revision, fixture lock version, page."""
+    state = json.loads(ind_path.read_text(encoding="utf-8")) if ind_path.exists() else {}
+    return {**payload, "expected_individual_revision": state.get("last_modified"),
+            "lock_version": 1, "expected_html_revision": None}
+
+
 def test_organizer_rental_lifecycle_and_publication_cycles(isolated_editor):
     routes, ind_path, base_path = isolated_editor
     with routes.app.test_client() as client:
         login(client, "organizer")
-        created = client.post("/api/blocks", json=rental())
+        created = client.post("/api/blocks", json=guard(ind_path, **rental()))
         assert created.status_code == 200
         block_id = created.json["block"]["id"]
         revision = None
         for dates, room, time in [(["2026-10-05"], "1.01", "10:00"), ([], "1.02", "11:00"), ([], "1.02", "11:30")]:
-            updated = client.put(f"/api/blocks/{block_id}", json={
-                "lesson_type": "rental", "subject": "Vermietung", "rental_dates": dates,
-                "room": room, "start_time": time, "end_time": "12:30", "id": "obsolete-client-id",
-            })
+            updated = client.put(f"/api/blocks/{block_id}", json=guard(
+                ind_path, lesson_type="rental", subject="Vermietung", rental_dates=dates,
+                room=room, start_time=time, end_time="12:30", id="obsolete-client-id",
+            ))
             assert updated.status_code == 200
             block = updated.json["block"]
             assert block["id"] == block_id and block["lesson_type"] == "rental"
@@ -78,10 +85,10 @@ def test_organizer_rental_lifecycle_and_publication_cycles(isolated_editor):
             login(client, "admin")
             group = rental(subject="Math", lesson_type="group", teacher="Teacher", rental_dates=None)
             group.pop("rental_dates")
-            publication = client.post("/api/schedule/publish", json={
-                "blocks": [group, {**block, "block_id": block_id, "source_layer": "individual"}],
-                "expected_base_revision": revision,
-            })
+            publication = client.post("/api/schedule/publish", json=guard(
+                ind_path, blocks=[group, {**block, "block_id": block_id, "source_layer": "individual"}],
+                expected_base_revision=revision,
+            ))
             assert publication.status_code == 200
             revision = publication.json["base_revision"]
             state = client.get("/api/schedule").json
@@ -89,42 +96,43 @@ def test_organizer_rental_lifecycle_and_publication_cycles(isolated_editor):
             assert [b["subject"] for b in state["base"]] == ["Math"]
             login(client, "organizer")
         assert client.post("/api/schedule/publish", json={"blocks": []}).status_code == 403
-        assert client.put(f"/api/blocks/{block_id}", json={"lesson_type": "group"}).status_code == 400
-        assert client.delete(f"/api/blocks/{block_id}").status_code == 200
+        assert client.put(f"/api/blocks/{block_id}", json=guard(ind_path, lesson_type="group")).status_code == 400
+        assert client.delete(f"/api/blocks/{block_id}", json=guard(ind_path)).status_code == 200
     assert json.loads(ind_path.read_text(encoding="utf-8"))["blocks"] == []
     assert len(json.loads(base_path.read_text(encoding="utf-8"))["blocks"]) == 1
 
 
 @pytest.mark.parametrize("role", ["admin", "editor", "organizer", "viewer", "unknown"])
 def test_managed_api_denies_group_and_unknown_type(isolated_editor, role):
-    routes, _, _ = isolated_editor
+    routes, ind_path, _ = isolated_editor
     with routes.app.test_client() as client:
         login(client, role)
         for kind in ("group", "unknown"):
-            assert client.post("/api/blocks", json=rental(lesson_type=kind)).status_code in (400, 403)
+            response = client.post("/api/blocks", json=guard(ind_path, **rental(lesson_type=kind)))
+            assert response.status_code == 403 or response.json["error"] == "Forbidden lesson_type"
     assert state_manager._validate_block(rental(), "unknown") == "Forbidden lesson_type"
 
 
 @pytest.mark.parametrize("role", ["admin", "editor"])
 def test_admin_editor_can_work_with_rental(isolated_editor, role):
-    routes, _, _ = isolated_editor
+    routes, ind_path, _ = isolated_editor
     with routes.app.test_client() as client:
         login(client, role)
-        response = client.post("/api/blocks", json=rental(subject=""))
+        response = client.post("/api/blocks", json=guard(ind_path, **rental(subject="")))
         assert response.status_code == 200
         assert response.json["block"]["subject"] == "Vermietung"
-        assert client.delete("/api/blocks/" + response.json["block"]["id"]).status_code == 200
+        assert client.delete("/api/blocks/" + response.json["block"]["id"], json=guard(ind_path)).status_code == 200
 
 
 def test_organizer_cannot_take_over_teaching_block(isolated_editor):
-    routes, _, _ = isolated_editor
+    routes, ind_path, _ = isolated_editor
     with routes.app.test_client() as client:
         login(client, "admin")
-        response = client.post("/api/blocks", json=rental(lesson_type="individual", subject="Deutsch"))
+        response = client.post("/api/blocks", json=guard(ind_path, **rental(lesson_type="individual", subject="Deutsch")))
         block_id = response.json["block"]["id"]
         login(client, "organizer")
-        assert client.put(f"/api/blocks/{block_id}", json={"lesson_type": "rental"}).status_code == 400
-        assert client.delete(f"/api/blocks/{block_id}").status_code == 403
+        assert client.put(f"/api/blocks/{block_id}", json=guard(ind_path, lesson_type="rental")).status_code == 400
+        assert client.delete(f"/api/blocks/{block_id}", json=guard(ind_path)).status_code == 403
 
 
 @pytest.mark.parametrize("extra", [
@@ -132,24 +140,24 @@ def test_organizer_cannot_take_over_teaching_block(isolated_editor):
     {"subject": " VERMietung "}, {"rental_dates_json": "[]"},
 ])
 def test_base_rejects_managed_block_mislabeled_group(isolated_editor, extra):
-    routes, _, base_path = isolated_editor
+    routes, ind_path, base_path = isolated_editor
     with routes.app.test_client() as client:
         login(client, "admin")
         payload = rental(lesson_type="group", subject="Room booking", **extra) if "subject" not in extra else rental(lesson_type="group", **extra)
         payload.pop("rental_dates")
-        response = client.post("/api/schedule/publish", json={"blocks": [payload], "expected_base_revision": None})
+        response = client.post("/api/schedule/publish", json=guard(ind_path, blocks=[payload], expected_base_revision=None))
         assert response.status_code == 400 and response.json["code"] == "MANAGED_BLOCK_IN_BASE"
     assert not base_path.exists()
 
 
 def test_base_rejects_known_managed_id_without_origin(isolated_editor):
-    routes, _, _ = isolated_editor
+    routes, ind_path, _ = isolated_editor
     with routes.app.test_client() as client:
         login(client, "admin")
-        block = client.post("/api/blocks", json=rental(subject="Custom booking")).json["block"]
+        block = client.post("/api/blocks", json=guard(ind_path, **rental(subject="Custom booking"))).json["block"]
         block["lesson_type"] = "group"
         block.pop("rental_dates")
-        response = client.post("/api/schedule/publish", json={"blocks": [block], "expected_base_revision": None})
+        response = client.post("/api/schedule/publish", json=guard(ind_path, blocks=[block], expected_base_revision=None))
         assert response.status_code == 400 and response.json["code"] == "MANAGED_BLOCK_IN_BASE"
 
 
@@ -250,9 +258,10 @@ def test_generator_and_route_deliver_updated_editor_code(isolated_editor, tmp_pa
             ("/static/auth_ui.js", "static/auth_ui.js"),
             ("/js_modules/trial_ui.js", "js_modules/trial_ui.js"),
             ("/js_modules/conflict_detector.js", "js_modules/conflict_detector.js"),
+            ("/static/lock_ui.js", "static/lock_ui.js"),
         ]:
             version = ("20261001_rental2" if "conflict_detector" in url else
-                       "20261001_rental3" if "individual_ui" in url or "base_sync_ui" in url else "20261001_rental1")
+                       "20261001_rental1" if "auth_ui" in url else "20261001_rental4")
             assert f'{url}?v={version}' in html
             response = client.get(url + "?v=" + version)
             assert response.status_code == 200

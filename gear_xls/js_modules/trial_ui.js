@@ -307,10 +307,20 @@
       btn.disabled = true;
       btn.textContent = "Сохранение...";
 
+      var individualUi = window.SchedGenIndividualUI;
+      var lockUi = window.SchedGenLockUI;
+
       fetch("/api/blocks/" + blockId + "/convert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
+        body: JSON.stringify({
+          expected_individual_revision:
+            individualUi && typeof individualUi.getIndividualRevision === "function"
+              ? individualUi.getIndividualRevision()
+              : null,
+          lock_version: lockUi && typeof lockUi.getLockVersion === "function" ? lockUi.getLockVersion() : null,
+        }),
       })
         .then(function (response) {
           return response.json();

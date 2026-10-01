@@ -50,6 +50,9 @@ from auth import authenticate, current_user, get_or_create_secret_key, login_req
 import backup_manager
 from excel_exporter import ExcelExportValidationError, process_schedule_export_request
 from gear_xls.schedule_exchange import ScheduleExchangeError, normalize_sync_metadata
+from gear_xls.snapshot_guard import (
+    GUARD_ERRORS, GUARD_KEYS, export_snapshot_conflict, parse_write_guard, schedule_html_revision,
+)
 import lock_manager
 import restore_manager
 import rooms_report
@@ -488,8 +491,9 @@ def schedule():
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    with open(html_path, "r", encoding="utf-8") as f:
-        html = f.read()
+    with open(html_path, "rb") as f:
+        raw_html = f.read()
+    html = raw_html.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     html = _inject_latest_spiski_data(html)
 
     user = current_user()
@@ -500,6 +504,7 @@ def schedule():
         f"  window.USER_ROLE = {json.dumps(user['role'])};\n"
         f"  window.DISPLAY_NAME = {json.dumps(user['display_name'])};\n"
         f'  window.PUBLISHED_BASE_AVAILABLE = {"true" if published_base_available else "false"};\n'
+        f"  window.SCHEDULE_HTML_REVISION = {json.dumps(schedule_html_revision(raw_html))};\n"
         "</script>\n"
         '<link rel="stylesheet" href="/static/nav.css">\n'
     )
@@ -510,11 +515,11 @@ def schedule():
 
     auth_ui_tag = (
         '<script src="/static/auth_ui.js?v=20261001_rental1"></script>\n'
-        '<script src="/static/base_sync_ui.js?v=20261001_rental3"></script>\n'
-        '<script src="/static/lock_ui.js"></script>\n'
-        '<script src="/js_modules/trial_ui.js?v=20261001_rental1"></script>\n'
+        '<script src="/static/base_sync_ui.js?v=20261001_rental4"></script>\n'
+        '<script src="/static/lock_ui.js?v=20261001_rental4"></script>\n'
+        '<script src="/js_modules/trial_ui.js?v=20261001_rental4"></script>\n'
         '<script src="/js_modules/conflict_detector.js?v=20261001_rental2"></script>\n'
-        '<script src="/static/individual_ui.js?v=20261001_rental3"></script>\n'
+        '<script src="/static/individual_ui.js?v=20261001_rental4"></script>\n'
         # Load the search scaffold after the existing schedule UI so it can
         # reuse the injected nav slot and exposed auth/base/individual APIs.
         '<script src="/static/schedule_search_ui.js"></script>\n'
@@ -536,6 +541,33 @@ def _require_lock(login):
     if state.get("holder") != login:
         return {"ok": False, "error": "No active lock", "code": "NO_LOCK"}
     return None
+
+
+def _write_guard(user, data, revision_key="expected_individual_revision"):
+    guard, missing = parse_write_guard(user["login"], data, revision_key)
+    if missing:
+        message = "Клиент не передал " + missing + ". Обновите страницу и повторите."
+        return None, (jsonify({"ok": False, "error": message, "code": missing.upper() + "_REQUIRED"}), 400)
+    return guard, None
+
+
+def _guard_error_response(code, revision=None):
+    status, message = GUARD_ERRORS[code]
+    payload = {"ok": False, "error": message, "code": code}
+    if code == "INDIVIDUAL_REVISION_CONFLICT":
+        payload.update(individual_revision=revision, force_individual_refresh=True)
+    return jsonify(payload), status
+
+
+def _mutation_guard_response(result):
+    error = getattr(result, "error", None)
+    if error in GUARD_ERRORS:
+        return _guard_error_response(error, getattr(result, "individual_revision", None))
+    return None
+
+
+def _without_guard_keys(data):
+    return {key: value for key, value in data.items() if key not in GUARD_KEYS}
 
 
 def _backup_error_response(exc):
@@ -868,6 +900,7 @@ def api_schedule():
             "base_revision": base.get("published_at"),
             "individual_revision": ind.get("last_modified"),
             "published_base_available": published_base_available,
+            "schedule_html_revision": state_manager.get_schedule_html_revision(),
         }
     )
 
@@ -900,12 +933,19 @@ def api_publish_schedule():
                 "code": "EXPECTED_BASE_REVISION_REQUIRED",
             }
         ), 400
+    guard, guard_response = _write_guard(user, data, revision_key="expected_html_revision")
+    if guard_response:
+        return guard_response
     try:
         result = state_manager.publish_base(
             blocks,
             user["login"],
             expected_base_revision=data.get("expected_base_revision"),
+            guard=guard,
         )
+    except state_manager.EditorWriteRejected as exc:
+        logger.warning("Publish rejected: login=%s code=%s", user["login"], exc.code)
+        return _guard_error_response(exc.code)
     except BaseRevisionConflict as exc:
         logger.warning(
             "Publish rejected due to base revision conflict: login=%s expected=%r current=%r",
@@ -956,8 +996,14 @@ def api_create_block():
     if err:
         return jsonify(err), 403
     data = request.get_json(force=True, silent=True) or {}
-    result = state_manager.add_block(data, user["role"])
+    guard, guard_response = _write_guard(user, data)
+    if guard_response:
+        return guard_response
+    result = state_manager.add_block(_without_guard_keys(data), user["role"], guard=guard)
     block, error = result
+    guard_response = _mutation_guard_response(result)
+    if guard_response:
+        return guard_response
     if error:
         payload = {"ok": False, "error": error, "code": "VALIDATION_ERROR"}
         payload.update(_individual_mutation_payload(result))
@@ -981,8 +1027,14 @@ def api_update_block(block_id):
     if err:
         return jsonify(err), 403
     data = request.get_json(force=True, silent=True) or {}
-    result = state_manager.update_block(block_id, data, user["role"])
+    guard, guard_response = _write_guard(user, data)
+    if guard_response:
+        return guard_response
+    result = state_manager.update_block(block_id, _without_guard_keys(data), user["role"], guard=guard)
     block, error = result
+    guard_response = _mutation_guard_response(result)
+    if guard_response:
+        return guard_response
     if error == "EXPIRED_TRIAL_PRUNED":
         payload = {"ok": False, "error": "Block expired and was pruned", "code": "EXPIRED_TRIAL_PRUNED"}
         payload.update(_individual_mutation_payload(result))
@@ -1013,8 +1065,14 @@ def api_delete_block(block_id):
     err = _require_lock(user["login"])
     if err:
         return jsonify(err), 403
-    result = state_manager.delete_block(block_id, user["role"])
+    guard, guard_response = _write_guard(user, request.get_json(force=True, silent=True) or {})
+    if guard_response:
+        return guard_response
+    result = state_manager.delete_block(block_id, user["role"], guard=guard)
     deleted, del_err = result
+    guard_response = _mutation_guard_response(result)
+    if guard_response:
+        return guard_response
     if del_err == "FORBIDDEN":
         payload = {"ok": False, "error": "Forbidden lesson_type", "code": "FORBIDDEN"}
         payload.update(_individual_mutation_payload(result))
@@ -1044,8 +1102,14 @@ def api_convert_block(block_id):
     err = _require_lock(user["login"])
     if err:
         return jsonify(err), 403
-    result = state_manager.convert_block_to_regular(block_id, user["role"])
+    guard, guard_response = _write_guard(user, request.get_json(force=True, silent=True) or {})
+    if guard_response:
+        return guard_response
+    result = state_manager.convert_block_to_regular(block_id, user["role"], guard=guard)
     block, error = result
+    guard_response = _mutation_guard_response(result)
+    if guard_response:
+        return guard_response
     if error == "EXPIRED_TRIAL_PRUNED":
         payload = {"ok": False, "error": "Block expired and was pruned", "code": "EXPIRED_TRIAL_PRUNED"}
         payload.update(_individual_mutation_payload(result))
@@ -1135,8 +1199,14 @@ def api_delete_column():
                     "code": "COLUMN_HAS_NON_TRIAL_BLOCKS",
                 }
             ), 403
-    result = state_manager.delete_column_blocks(building, day, room)
+    guard, guard_response = _write_guard(user, data)
+    if guard_response:
+        return guard_response
+    result = state_manager.delete_column_blocks(building, day, room, guard=guard)
     count, _error = result
+    guard_response = _mutation_guard_response(result)
+    if guard_response:
+        return guard_response
     return jsonify(
         {
             "ok": True,
@@ -1189,6 +1259,17 @@ def export_to_excel():
         # Never label an old client payload with fresh server revisions.
         raw_metadata = request.form.get("schedule_sync")
         sync_metadata = normalize_sync_metadata(json.loads(raw_metadata)) if raw_metadata else None
+        stale = export_snapshot_conflict(
+            sync_metadata,
+            json.loads(schedule_data_json),
+            request.form.get("schedule_html_revision"),
+            html_revision=state_manager.get_schedule_html_revision(),
+            base_revision=state_manager.get_base_revision(),
+            individual_state=state_manager.get_individual_state_unpruned(),
+        ) if sync_metadata is not None else None
+        if stale:
+            logger.warning("Excel export rejected: %s", stale)
+            return jsonify({"error": stale, "code": "EXPORT_SNAPSHOT_STALE"}), 409
         output_file = process_schedule_export_request(
             schedule_data_json, EXCEL_EXPORTS_DIR, sync_metadata=sync_metadata,
         )
