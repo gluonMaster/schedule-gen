@@ -22,6 +22,28 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function rentalScheduleLabel(slot) {
+  if (slot.lesson_type !== "rental") return "";
+  var dates = slot.rental_dates || [];
+  return dates.length ? "Аренда только по датам: " + dates.join(", ") : "Аренда еженедельно";
+}
+
+function renderDatedRentalNotes() {
+  var notes = [];
+  getTargetsFromFilters(_availData).forEach(function(item) {
+    getActiveDays().forEach(function(day) {
+      var building = _availData.buildings[item.building];
+      var slots = ((building.days || {})[day] || {})[item.room] || [];
+      slots.forEach(function(slot) {
+        if (slot.lesson_type === "rental" && (slot.rental_dates || []).length) {
+          notes.push(escapeHtml(item.building + " / " + item.room + " / " + day + " " + slot.start + "–" + slot.end + ": " + rentalScheduleLabel(slot)));
+        }
+      });
+    });
+  });
+  return notes.length ? '<div class="report-summary">Занятость и свободные окна показаны без выбора календарной даты. Датированные ограничения:<ul><li>' + notes.join("</li><li>") + "</li></ul></div>" : "";
+}
+
 function parseTimeToMin(t) {
   var match = String(t || "").trim().match(/^(\d{1,2}):(\d{2})$/);
   var hour;
@@ -828,7 +850,7 @@ function renderTable() {
         return;
       }
 
-      cls = /^(individual|nachhilfe|trial)$/i.test(slot.lesson_type || "")
+      cls = /^(individual|nachhilfe|trial|rental)$/i.test(slot.lesson_type || "")
         ? "slot-busy-ind"
         : "slot-busy";
       titleText = [slot.subject || "", slot.students || ""].join(" ").trim();
@@ -836,6 +858,10 @@ function renderTable() {
         ? titleText + " / " + (slot.teacher || "")
         : (slot.teacher || "");
       text = (slot.subject || "").slice(0, 10) || "*";
+      if (slot.lesson_type === "rental") {
+        titleText += " / " + rentalScheduleLabel(slot);
+        text = (slot.rental_dates || []).length ? "Аренда 📅" : "Аренда";
+      }
 
       rows.push(
         '<td class="' +
@@ -1276,10 +1302,10 @@ function renderFreeWindows() {
 
   if (_searchMode === "available") {
     renderAvailableRoomsReport(target);
-    return;
+  } else {
+    renderSingleRoomReport(target);
   }
-
-  renderSingleRoomReport(target);
+  target.innerHTML = renderDatedRentalNotes() + target.innerHTML;
 }
 
 function ensureDayFilterControls() {

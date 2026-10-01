@@ -302,20 +302,27 @@ function _refreshIndividualBeforeExport(onReady, onError) {
             try {
                 data = JSON.parse(xhr.responseText);
             } catch (e) {
-                onReady();
+                onError('invalid_response');
                 return;
             }
 
-            if (window.refreshIndividualLayer) {
+            if (!data || !Array.isArray(data.blocks) || typeof window.refreshIndividualLayer !== 'function') {
+                onError('refresh_unavailable');
+                return;
+            }
+            try {
                 refreshResult = window.refreshIndividualLayer(data);
                 if (refreshResult && typeof refreshResult.then === 'function') {
                     refreshResult.then(function() {
                         onReady();
                     }).catch(function() {
-                        onReady();
+                        onError('refresh_failed');
                     });
                     return;
                 }
+            } catch (error) {
+                onError('refresh_failed');
+                return;
             }
 
             onReady();
@@ -446,22 +453,8 @@ function exportScheduleToExcel(onDone, options) {
     }
 
     try {
-        // Проверяем наличие конфликтов перед экспортом
         if (!_options.searchPrepared) {
             _prepareSearchForExcelExport();
-        }
-        if (typeof ConflictDetector !== 'undefined' && ConflictDetector.hasConflicts()) {
-            var summary = ConflictDetector.getConflictSummary();
-            var proceed = confirm(
-                'В расписании обнаружены конфликты (блоки выделены красным):\n\n' +
-                summary +
-                '\n\nЭкспортировать расписание с конфликтами?\n' +
-                '(При запуске планировщика "Учесть изменения" такое расписание может дать ошибку INFEASIBLE)'
-            );
-            if (!proceed) {
-                _callDone();
-                return;
-            }
         }
         console.log('Начинаем сбор данных для экспорта в Excel...');
         
@@ -476,13 +469,27 @@ function exportScheduleToExcel(onDone, options) {
 
             _refreshIndividualBeforeExport(function() {
                 // Собираем данные расписания
-                var scheduleData = collectScheduleData();
+                var scheduleData = collectScheduleData({ includeHidden: true });
                 var exportValidation = validateScheduleDataForExcelExport(scheduleData);
                 if (!exportValidation.ok) {
                     hideExportProgress();
                     alert(exportValidation.message);
                     _callDone();
                     return;
+                }
+                // Check the exact synchronized snapshot sent below, including hidden records.
+                var calculationDate = typeof ConflictDetector !== 'undefined' ? ConflictDetector.getCalculationDate() : null;
+                if (typeof ConflictDetector !== 'undefined' && ConflictDetector.hasConflicts(scheduleData, calculationDate)) {
+                    var proceed = confirm(
+                        'В экспортируемом расписании обнаружены конфликты:\n\n' +
+                        ConflictDetector.getConflictSummary(scheduleData, calculationDate) +
+                        '\n\nЭкспортировать расписание с конфликтами?\n' +
+                        '(При запуске планировщика "Учесть изменения" такое расписание может дать ошибку INFEASIBLE)'
+                    );
+                    if (!proceed) {
+                        _callDone();
+                        return;
+                    }
                 }
                 console.log('Собрано записей: ' + scheduleData.length);
                 

@@ -232,7 +232,7 @@ def test_generator_and_route_deliver_updated_editor_code(isolated_editor, tmp_pa
     from gear_xls.html_javascript import get_javascript
     routes, _, _ = isolated_editor
     js = get_javascript(15, 100, 45, ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"], 5)
-    for name in ("block_creation_dialog", "editing_update", "lesson_type_filter", "export_to_excel", "block_content_sync"):
+    for name in ("block_creation_dialog", "editing_update", "lesson_type_filter", "export_to_excel", "block_content_sync", "conflict_detector"):
         assert (PROJECT_ROOT / "gear_xls" / "js_modules" / f"{name}.js").read_text(encoding="utf-8") in js
     html_path = tmp_path / "test-schedule.html"
     html_path.write_text("<html><head></head><body></body></html>", encoding="utf-8")
@@ -249,7 +249,8 @@ def test_generator_and_route_deliver_updated_editor_code(isolated_editor, tmp_pa
             ("/js_modules/trial_ui.js", "js_modules/trial_ui.js"),
             ("/js_modules/conflict_detector.js", "js_modules/conflict_detector.js"),
         ]:
-            assert f'{url}?v=20261001_rental1' in html
-            response = client.get(url + "?v=20261001_rental1")
+            version = "20261001_rental2" if "conflict_detector" in url else "20261001_rental1"
+            assert f'{url}?v={version}' in html
+            response = client.get(url + "?v=" + version)
             assert response.status_code == 200
             assert response.data == (PROJECT_ROOT / "gear_xls" / file).read_bytes()

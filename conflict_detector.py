@@ -23,11 +23,11 @@ def check_potential_conflicts(optimizer):
                 continue
             if first.has_fixed_time and second.has_fixed_time:
                 if fixed_conflict_type(first, second, optimizer.calculation_date):
-                    if first.has_fixed_room and second.has_fixed_room:
+                    if first.day and second.day and first.has_fixed_room and second.has_fixed_room:
                         rental_conflicts.append((i, j))
                         print(f"CONFLICT DETECTED: Rental room occupancy: classes {i}, {j}")
                     else:
-                        print(f"Room choice required for rental pair: classes {i}, {j}")
+                        print(f"Day or room choice required for rental pair: classes {i}, {j}")
             else:
                 print(f"Rental room occupancy checked with chosen day/time/room: classes {i}, {j}")
     

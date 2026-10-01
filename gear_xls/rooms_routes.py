@@ -129,7 +129,7 @@ td.slot-free { background: #fff; }
 </div>
 <div id="free-windows"></div>
 <script src="/static/auth_ui.js"></script>
-<script src="/static/rooms_report.js"></script>
+<script src="/static/rooms_report.js?v=20261001_rental2"></script>
 </body>
 </html>"""
 

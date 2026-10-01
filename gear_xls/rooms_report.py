@@ -229,6 +229,8 @@ def compute_availability() -> dict:
                 "students": str(block.get("students", "")).strip(),
                 "teacher": str(block.get("teacher", "")).strip(),
                 "lesson_type": str(block.get("lesson_type", "")).strip(),
+                "rental_dates": list(block.get("rental_dates") or []),
+                "trial_dates": list(block.get("trial_dates") or []),
             }
         )
     if spans:

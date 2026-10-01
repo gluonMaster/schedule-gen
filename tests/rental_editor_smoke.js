@@ -105,6 +105,9 @@ function load(relative, exports = {}) {
     vm.runInContext(code, context, { filename: relative });
 }
 load('js_modules/block_content_sync.js');
+// Load the actual normalization helper without replacing the existing placement stubs.
+vm.runInContext(fs.readFileSync(path.join(root, 'gear_xls/js_modules/column_helpers.js'), 'utf8')
+    .split('function getHeaderLocalColumnIndex')[0], context);
 load('js_modules/lesson_type_filter.js');
 load('js_modules/export_to_excel.js');
 load('js_modules/trial_ui.js');

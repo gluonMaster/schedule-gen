@@ -1,0 +1,35 @@
+{
+  "calculation_date": "2026-10-01",
+  "defaults": {
+    "lesson_type": "rental", "subject": "Vermietung", "teacher": "Renter",
+    "students": "Organisation", "building": "Villa", "room": "1.01",
+    "day": "Mo", "start_time": "10:00", "end_time": "11:00", "duration": 60,
+    "rental_dates": [], "trial_dates": []
+  },
+  "cases": [
+    {"name": "same_renter_other_room", "second": {"room": "1.02"}, "conflict": null},
+    {"name": "renter_matches_lesson_teacher", "second": {"lesson_type": "group", "room": "1.02", "students": "2A"}, "conflict": null},
+    {"name": "weekly_rentals_same_room", "conflict": "room"},
+    {"name": "rental_lesson_same_room", "second": {"lesson_type": "group", "teacher": "Teacher", "students": "2A"}, "conflict": "room"},
+    {"name": "same_room_other_building", "second": {"building": "Kolibri"}, "conflict": null},
+    {"name": "adjacent_intervals", "second": {"start_time": "11:00", "end_time": "12:00"}, "conflict": null},
+    {"name": "different_mondays", "first": {"rental_dates": ["2026-10-05"]}, "second": {"rental_dates": ["2026-10-12"]}, "conflict": null},
+    {"name": "intersecting_date_lists", "first": {"rental_dates": ["2026-10-05", "2026-10-12"]}, "second": {"rental_dates": ["2026-10-12", "2026-10-19"]}, "conflict": "room"},
+    {"name": "dated_rental_weekly_lesson", "first": {"rental_dates": ["2026-10-05"]}, "second": {"lesson_type": "group", "teacher": "Teacher", "students": "2A"}, "conflict": "room"},
+    {"name": "rental_trial_same_date", "first": {"rental_dates": ["2026-10-05"]}, "second": {"lesson_type": "trial", "trial_dates": ["2026-10-05"]}, "conflict": "room"},
+    {"name": "rental_trial_other_date", "first": {"rental_dates": ["2026-10-05"]}, "second": {"lesson_type": "trial", "trial_dates": ["2026-10-12"]}, "conflict": null},
+    {"name": "weekly_rental_expired_trial", "second": {"lesson_type": "trial", "trial_dates": ["2026-09-28"]}, "conflict": null},
+    {"name": "expired_rental_stays_dated", "first": {"rental_dates": ["2026-09-28"]}, "second": {"lesson_type": "group", "teacher": "Teacher", "students": "2A"}, "conflict": null},
+    {"name": "expired_date_intersection", "first": {"rental_dates": ["2026-09-28", "2026-10-05"]}, "second": {"rental_dates": ["2026-09-28", "2026-10-12"]}, "conflict": null},
+    {"name": "today_is_active", "first": {"day": "Do", "rental_dates": ["2026-10-01"]}, "second": {"day": "Do"}, "conflict": "room"},
+    {"name": "different_weekday", "first": {"rental_dates": ["2026-10-05"]}, "second": {"day": "Di", "lesson_type": "group"}, "conflict": null},
+    {"name": "normalized_room_alias", "first": {"room": "V1.01"}, "conflict": "room"},
+    {"name": "no_student_resource_for_rental", "second": {"lesson_type": "individual", "teacher": "Teacher", "room": "1.02"}, "conflict": null},
+    {"name": "ordinary_teacher_protected", "first": {"lesson_type": "group", "teacher": "Teacher", "students": "1A"}, "second": {"lesson_type": "group", "teacher": "Teacher", "students": "2A", "room": "1.02"}, "conflict": "teacher"},
+    {"name": "ordinary_group_protected", "first": {"lesson_type": "group", "teacher": "Teacher1", "students": "1A+2A Kunst"}, "second": {"lesson_type": "group", "teacher": "Teacher2", "students": "2A", "room": "1.02"}, "conflict": "group"},
+    {"name": "ordinary_trials_keep_existing_rule", "first": {"lesson_type": "trial", "trial_dates": ["2026-10-05"]}, "second": {"lesson_type": "trial", "trial_dates": ["2026-10-12"], "room": "1.02"}, "conflict": "teacher"},
+    {"name": "exact_rental_overlap_off_grid", "first": {"start_time": "10:01", "end_time": "10:07", "duration": 6}, "second": {"start_time": "10:06", "end_time": "10:11", "duration": 5}, "conflict": "room"},
+    {"name": "exact_rental_adjacent_off_grid", "first": {"start_time": "10:01", "end_time": "10:07", "duration": 6}, "second": {"start_time": "10:07", "end_time": "10:12", "duration": 5}, "conflict": null},
+    {"name": "dated_sunday", "first": {"day": "So", "rental_dates": ["2026-10-04"]}, "second": {"day": "So", "lesson_type": "trial", "trial_dates": ["2026-10-04"]}, "conflict": "room"}
+  ]
+}

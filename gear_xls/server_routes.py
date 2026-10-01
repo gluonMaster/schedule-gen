@@ -512,7 +512,7 @@ def schedule():
         '<script src="/static/base_sync_ui.js?v=20261001_rental1"></script>\n'
         '<script src="/static/lock_ui.js"></script>\n'
         '<script src="/js_modules/trial_ui.js?v=20261001_rental1"></script>\n'
-        '<script src="/js_modules/conflict_detector.js?v=20261001_rental1"></script>\n'
+        '<script src="/js_modules/conflict_detector.js?v=20261001_rental2"></script>\n'
         '<script src="/static/individual_ui.js?v=20261001_rental1"></script>\n'
         # Load the search scaffold after the existing schedule UI so it can
         # reuse the injected nav slot and exposed auth/base/individual APIs.

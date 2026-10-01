@@ -381,8 +381,8 @@ class ScheduleReader:
                     )
                     
                     # Update sets of teachers, groups, rooms, buildings, days
-                    if class_data.teacher:
-                        self.teachers.add(class_data.teacher)
+                    if class_data.resource_teacher:
+                        self.teachers.add(class_data.resource_teacher)
                     if class_data.building:
                         self.buildings.add(class_data.building)
                     if class_data.day:
@@ -404,19 +404,17 @@ class ScheduleReader:
         
         # Connect linked classes
         for section_idx, section in planning_map.items():
-            if 'B' in section:
-                main_class = section['B']
-                main_class.linked_classes = []  # Initialize empty list
-                
-                if 'C' in section:
-                    section['C'].previous_class = main_class.subject
-                    main_class.next_class = section['C'].subject
-                    main_class.linked_classes.append(section['C'])
-                    
-                    if 'D' in section:
-                        section['D'].previous_class = section['C'].subject
-                        section['C'].next_class = section['D'].subject
-                        main_class.linked_classes.append(section['D'])
+            if 'B' not in section:
+                continue
+            # Rentals in a planning section are independent room bookings.
+            chain = [section[col] for col in ('B', 'C', 'D')
+                     if col in section and (col != 'D' or 'C' in section)
+                     and not section[col].is_rental]
+            if chain:
+                chain[0].linked_classes = chain[1:]
+                for previous, current in zip(chain, chain[1:]):
+                    current.previous_class = previous.subject
+                    previous.next_class = current.subject
         
         # Collect all classes including linked ones
         all_classes = []

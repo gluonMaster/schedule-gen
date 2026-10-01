@@ -3,6 +3,7 @@
 """
 
 from time_utils import pause_to_slots
+from rental_conflicts import is_rental
 
 
 def build_linked_chains(optimizer):
@@ -11,11 +12,13 @@ def build_linked_chains(optimizer):
     seen = set()
 
     for idx, c in enumerate(optimizer.classes):
-        if not getattr(c, "linked_classes", None):
+        if is_rental(c) or not getattr(c, "linked_classes", None):
             continue
 
         chain = [idx]
         for linked_class in c.linked_classes:
+            if is_rental(linked_class):
+                continue
             linked_idx = optimizer._find_class_index(linked_class)
 
             if linked_idx in chain:
@@ -34,12 +37,14 @@ def add_linked_constraints(optimizer):
     build_linked_chains(optimizer)
     
     for idx, c in enumerate(optimizer.classes):
-        if hasattr(c, 'linked_classes') and c.linked_classes:
+        if not is_rental(c) and hasattr(c, 'linked_classes') and c.linked_classes:
             # Process linked classes (classes that must occur in sequence)
             prev_class = c
             prev_idx = idx
             
             for linked_class in c.linked_classes:
+                if is_rental(linked_class):
+                    continue
                 # Find the index of the linked class using our helper method.
                 linked_idx = optimizer._find_class_index(linked_class)
 

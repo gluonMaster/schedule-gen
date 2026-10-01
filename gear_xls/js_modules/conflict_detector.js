@@ -42,6 +42,66 @@ var ConflictDetector = (function() {
         return lessonType || 'group';
     }
 
+    function localCalculationDate() {
+        var now = new Date();
+        return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    }
+
+    function parseDates(value) {
+        if (Array.isArray(value)) return value.slice();
+        if (!value) return [];
+        try {
+            var dates = JSON.parse(value);
+            return Array.isArray(dates) ? dates : ['invalid'];
+        } catch (error) {
+            return ['invalid']; // Invalid dated data must not become weekly.
+        }
+    }
+
+    function activeDates(block, calculationDate) {
+        var days = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+        return block.dates.filter(function(value) {
+            if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value < calculationDate) return false;
+            var parsed = new Date(value + 'T12:00:00');
+            if (isNaN(parsed.getTime()) || parsed.getDate() !== Number(value.slice(8, 10)) ||
+                parsed.getMonth() + 1 !== Number(value.slice(5, 7))) return false;
+            return !block.day || days[parsed.getDay()] === block.day;
+        });
+    }
+
+    function calendarOverlap(block1, block2, calculationDate) {
+        if (block1.lessonType !== 'rental' && block2.lessonType !== 'rental') return true;
+        if (block1.dates.length && block2.dates.length) {
+            var dates2 = activeDates(block2, calculationDate);
+            return activeDates(block1, calculationDate).some(function(value) { return dates2.indexOf(value) !== -1; });
+        }
+        if (block1.dates.length || block2.dates.length) {
+            var dated = block1.dates.length ? block1 : block2;
+            var weekly = block1.dates.length ? block2 : block1;
+            var days = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+            return activeDates(dated, calculationDate).some(function(value) {
+                return !weekly.day || days[new Date(value + 'T12:00:00').getDay()] === weekly.day;
+            });
+        }
+        return true;
+    }
+
+    function parseRecord(record) {
+        var lessonType = normalizeLessonType(record.lesson_type);
+        var parsed = typeof parseTimeRange === 'function' ? parseTimeRange(record.start_time + '-' + record.end_time) : null;
+        var building = normalizeText(record.building);
+        return {
+            day: record.day || '', building: building, subject: record.subject || '',
+            teacher: record.teacher || '', students: record.students || '',
+            room: normalizeRoomForBuilding(record.room || '', building), lessonType: lessonType,
+            groupMarkers: lessonType === 'group' ? extractGroupMarkers(record.students) : [],
+            dates: parseDates(lessonType === 'rental' ? (record.rental_dates || record.rental_dates_json) :
+                (lessonType === 'trial' ? (record.trial_dates || record.trial_dates_json) : [])),
+            timeRange: record.start_time + '-' + record.end_time,
+            startMinutes: parsed ? parsed.startMinutes : null, endMinutes: parsed ? parsed.endMinutes : null
+        };
+    }
+
     function extractGroupMarkers(students) {
         var normalized = normalizeText(students);
         var markers = [];
@@ -114,8 +174,10 @@ var ConflictDetector = (function() {
             subject: subject,
             teacher: teacher,
             students: students,
-            room: room,
+            room: normalizeRoomForBuilding(room, building),
             lessonType: lessonType,
+            dates: parseDates(lessonType === 'rental' ? blockElement.getAttribute('data-rental-dates') :
+                (lessonType === 'trial' ? blockElement.getAttribute('data-trial-dates') : [])),
             groupMarkers: lessonType === 'group' ? extractGroupMarkers(students) : [],
             timeRange: timeRange,
             startMinutes: parsedTime ? parsedTime.startMinutes : null,
@@ -132,7 +194,8 @@ var ConflictDetector = (function() {
     function detectConflictType(block1, block2) {
         var sharedGroupMarker;
 
-        if (block1.teacher && block1.teacher === block2.teacher) {
+        var teachingPair = block1.lessonType !== 'rental' && block2.lessonType !== 'rental';
+        if (teachingPair && block1.teacher && block1.teacher === block2.teacher) {
             return {
                 type: 'teacher',
                 label: block1.teacher
@@ -155,6 +218,7 @@ var ConflictDetector = (function() {
         }
 
         if (
+            teachingPair &&
             block1.lessonType !== 'group' &&
             block2.lessonType !== 'group' &&
             block1.students &&
@@ -169,12 +233,13 @@ var ConflictDetector = (function() {
         return null;
     }
 
-    function findConflicts() {
+    function findConflicts(scheduleData, calculationDate) {
         if (typeof checkTimeOverlap !== 'function') {
             return [];
         }
 
-        var parsedBlocks = getVisibleBlocks().map(parseBlock);
+        var parsedBlocks = Array.isArray(scheduleData) ? scheduleData.map(parseRecord) : getVisibleBlocks().map(parseBlock);
+        calculationDate = calculationDate || localCalculationDate();
         var conflicts = [];
 
         for (var i = 0; i < parsedBlocks.length; i++) {
@@ -185,6 +250,8 @@ var ConflictDetector = (function() {
                 if (!block1.day || !block2.day || block1.day !== block2.day) {
                     continue;
                 }
+
+                if (!calendarOverlap(block1, block2, calculationDate)) continue;
 
                 if (
                     block1.startMinutes === null ||
@@ -231,8 +298,8 @@ var ConflictDetector = (function() {
         return conflicts.length;
     }
 
-    function hasConflicts() {
-        return findConflicts().length > 0;
+    function hasConflicts(scheduleData, calculationDate) {
+        return findConflicts(scheduleData, calculationDate).length > 0;
     }
 
     function getConflictLabel(conflict) {
@@ -253,8 +320,8 @@ var ConflictDetector = (function() {
         return conflict.block1.timeRange || conflict.block2.timeRange || '';
     }
 
-    function getConflictSummary() {
-        var conflicts = findConflicts();
+    function getConflictSummary(scheduleData, calculationDate) {
+        var conflicts = findConflicts(scheduleData, calculationDate);
         if (!conflicts.length) {
             return 'Конфликты не обнаружены.';
         }
@@ -283,17 +350,18 @@ var ConflictDetector = (function() {
     ensureStyles();
 
     return {
-        findConflicts: function() {
-            return findConflicts();
+        getCalculationDate: localCalculationDate,
+        findConflicts: function(scheduleData, calculationDate) {
+            return findConflicts(scheduleData, calculationDate);
         },
         highlightConflicts: function() {
             return highlightConflicts();
         },
-        hasConflicts: function() {
-            return hasConflicts();
+        hasConflicts: function(scheduleData, calculationDate) {
+            return hasConflicts(scheduleData, calculationDate);
         },
-        getConflictSummary: function() {
-            return getConflictSummary();
+        getConflictSummary: function(scheduleData, calculationDate) {
+            return getConflictSummary(scheduleData, calculationDate);
         }
     };
 })();
