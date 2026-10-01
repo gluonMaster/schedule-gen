@@ -86,9 +86,18 @@ var ConflictDetector = (function() {
         return true;
     }
 
+    // Export rows from schedule.html carry {hour, minute} objects (block_utils' minutesToTime).
+    function recordClock(value) {
+        if (value && typeof value === 'object' && 'hour' in value && 'minute' in value) {
+            return minutesToLabel(Number(value.hour) * 60 + Number(value.minute));
+        }
+        return value || '';
+    }
+
     function parseRecord(record) {
         var lessonType = normalizeLessonType(record.lesson_type);
-        var parsed = typeof parseTimeRange === 'function' ? parseTimeRange(record.start_time + '-' + record.end_time) : null;
+        var timeRange = recordClock(record.start_time) + '-' + recordClock(record.end_time);
+        var parsed = typeof parseTimeRange === 'function' ? parseTimeRange(timeRange) : null;
         var building = normalizeText(record.building);
         return {
             day: record.day || '', building: building, subject: record.subject || '',
@@ -97,7 +106,7 @@ var ConflictDetector = (function() {
             groupMarkers: lessonType === 'group' ? extractGroupMarkers(record.students) : [],
             dates: parseDates(lessonType === 'rental' ? (record.rental_dates || record.rental_dates_json) :
                 (lessonType === 'trial' ? (record.trial_dates || record.trial_dates_json) : [])),
-            timeRange: record.start_time + '-' + record.end_time,
+            timeRange: timeRange,
             startMinutes: parsed ? parsed.startMinutes : null, endMinutes: parsed ? parsed.endMinutes : null
         };
     }

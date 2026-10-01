@@ -84,6 +84,18 @@ def dates_from_record(record, field):
     return dates
 
 
+def _clock_text(value):
+    # The editor page sends {hour, minute} objects (block_utils' minutesToTime); Excel may give time values.
+    if isinstance(value, dict) and "hour" in value and "minute" in value:
+        try:
+            return f"{int(value['hour']):02d}:{int(value['minute']):02d}"
+        except (TypeError, ValueError):
+            return str(value)
+    if hasattr(value, "hour") and hasattr(value, "minute"):
+        return f"{value.hour:02d}:{value.minute:02d}"
+    return str(value or "")
+
+
 def normalize_exchange_record(record, *, legacy=False):
     result = dict(record)
     explicit_type = str(result.get("lesson_type") or "").strip().lower()
@@ -111,7 +123,8 @@ def normalize_exchange_record(record, *, legacy=False):
         if not isinstance(result.get('day'), str) or result['day'] not in WEB_EDITOR_DAY_SET:
             raise ScheduleExchangeError("Invalid rental day")
         for key in ("start_time", "end_time"):
-            if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", str(result.get(key) or "")):
+            result[key] = _clock_text(result.get(key))
+            if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", result[key]):
                 raise ScheduleExchangeError(f"Invalid rental {key}")
         start, end = (sum(int(n) * factor for n, factor in zip(result[key].split(":"), (60, 1)))
                       for key in ("start_time", "end_time"))

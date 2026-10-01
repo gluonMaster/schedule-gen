@@ -16,6 +16,13 @@ function block(data, i = 0) {
         'data-trial-dates': JSON.stringify(data.trial_dates), 'data-col-index': String(i),
         'data-block-id': 'booking-' + i,
     };
+    const minutes = t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+    const start = minutes(data.start_time), end = minutes(data.end_time);
+    if (start % 5 === 0 && end % 5 === 0 && start >= 540) {
+        // As generated blocks: a 09:00 grid of 5-minute rows, from which the exporter derives payload times.
+        attrs['data-start-row'] = String((start - 540) / 5);
+        attrs['data-row-span'] = String((end - start) / 5);
+    }
     const classes = new Set();
     return {
         attrs, lines: [data.subject, data.teacher, data.students, data.room, data.start_time + '-' + data.end_time],
@@ -79,7 +86,11 @@ blocks[1].style.display = 'none';
 assert.equal(context.ConflictDetector.hasConflicts(), false);
 }
 load('js_modules/export_to_excel.js');
+// schedule.html runs all modules in one closure where block_utils' minutesToTime ({hour, minute}) is declared
+// after the exporter's, so real payload times are objects; reproduce that order for the export checks below.
+load('js_modules/block_utils.js');
 if (!integrationOnly) {
+assert.equal(JSON.stringify(context.collectScheduleData()[0].start_time), '{"hour":10,"minute":0}');
 assert.equal(context.collectScheduleData().length, 1);
 assert.equal(context.collectScheduleData({ includeHidden: true }).length, 2);
 assert.equal(context.ConflictDetector.hasConflicts(context.collectScheduleData({ includeHidden: true })), true);

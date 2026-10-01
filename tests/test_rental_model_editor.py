@@ -224,6 +224,20 @@ def test_export_validation_accepts_only_dated_sunday_rental(raw_dates, valid):
             validate_schedule_data_for_export([block])
 
 
+def test_export_accepts_editor_clock_objects(tmp_path):
+    # schedule.html sends every row's time as {hour, minute} (block_utils' minutesToTime wins in its closure).
+    from openpyxl import load_workbook
+    from gear_xls.excel_exporter import create_excel_from_html_data
+    clock = lambda hour, minute=0: {"hour": hour, "minute": minute}
+    rows = [rental(id="r1", start_time=clock(14, 30), end_time=clock(17, 30), duration=180),
+            {"subject": "Kunst", "teacher": "T", "students": "2A", "building": "Villa", "room": "1.02", "day": "Mo",
+             "start_time": clock(10), "end_time": clock(11), "duration": 60, "lesson_type": "group", "color": "#fff"}]
+    path = create_excel_from_html_data(rows, str(tmp_path / "export.xlsx"))
+    values = [[cell.value for cell in row] for row in load_workbook(path)["Schedule"].iter_rows(min_row=2)]
+    assert [row[6:9] for row in values] == [["14:30", "17:30", 180], ["10:00", "11:00", 60]]
+    assert (values[0][9], values[0][11]) == ("rental", "r1")
+
+
 @pytest.mark.parametrize("teacher,students", [("", "Org"), ("Contact", ""), ("", "")])
 def test_generated_block_preserves_empty_positions_dates_and_id(teacher, students):
     interval = rental(id="stable-id", teacher=teacher, students=students, rental_dates=["2026-10-05"])
@@ -260,7 +274,7 @@ def test_generator_and_route_deliver_updated_editor_code(isolated_editor, tmp_pa
             ("/js_modules/conflict_detector.js", "js_modules/conflict_detector.js"),
             ("/static/lock_ui.js", "static/lock_ui.js"),
         ]:
-            version = ("20261001_rental2" if "conflict_detector" in url else
+            version = ("20261001_rental6" if "conflict_detector" in url else
                        "20261001_rental1" if "auth_ui" in url else "20261001_rental4")
             assert f'{url}?v={version}' in html
             response = client.get(url + "?v=" + version)
