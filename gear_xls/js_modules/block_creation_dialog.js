@@ -292,51 +292,9 @@ function openCreateBlockDialog(e, preselectedDay, preselectedCol, preselectedRow
     // Предотвращаем скролл страницы
     document.body.style.overflow = 'hidden';
 
-    // --- Секция типа занятия и дат (trial_ui) ---
-    if (window.TrialUI) {
-        window.TrialUI.injectTrialStyles();
-        var _createForm = dialogElement.querySelector('#create-form');
-        var _createButtonRow = _createForm ? _createForm.querySelector('.button-row') : null;
-        var _currentRole = typeof window.USER_ROLE !== 'undefined' ? window.USER_ROLE : '';
-        if (_createForm && _createButtonRow && (_currentRole === 'admin' || _currentRole === 'editor' || _currentRole === 'organizer')) {
-            // Dropdown выбора типа занятия
-            var _typeWrapper = document.createElement('label');
-            _typeWrapper.id = 'create-lesson-type-wrapper';
-            _typeWrapper.textContent = 'Тип занятия:';
-            var _typeSelect = document.createElement('select');
-            _typeSelect.id = 'new-lesson-type';
-            _typeSelect.style.marginTop = '5px';
-            if (_currentRole === 'organizer') {
-                // Организатор может создавать только пробные/разовые занятия
-                var _optTrial = document.createElement('option');
-                _optTrial.value = 'trial';
-                _optTrial.textContent = 'Пробное/разовое';
-                _typeSelect.appendChild(_optTrial);
-                _typeSelect.disabled = true;
-            } else {
-                var _optAuto = document.createElement('option');
-                _optAuto.value = '';
-                _optAuto.textContent = 'авто (по предмету)';
-                var _optTrial2 = document.createElement('option');
-                _optTrial2.value = 'trial';
-                _optTrial2.textContent = 'Пробное/разовое';
-                _typeSelect.appendChild(_optAuto);
-                _typeSelect.appendChild(_optTrial2);
-            }
-            _typeWrapper.appendChild(_typeSelect);
-            _createForm.insertBefore(_typeWrapper, _createButtonRow);
-
-            // Секция дат (скрыта по умолчанию для не-organizer)
-            var _datesSection = window.TrialUI.buildTrialDatesSection([]);
-            _datesSection.id = 'create-trial-dates-section';
-            _datesSection.style.display = (_currentRole === 'organizer') ? '' : 'none';
-            _createForm.insertBefore(_datesSection, _createButtonRow);
-
-            // Переключение видимости секции дат при смене типа
-            _typeSelect.addEventListener('change', function () {
-                _datesSection.style.display = (_typeSelect.value === 'trial') ? '' : 'none';
-            });
-        }
+    // The injected managed-layer UI owns type and date controls for every role.
+    if (window.SchedGenIndividualUI) {
+        window.SchedGenIndividualUI.enhanceCreateDialog(dialogElement.querySelector('#create-form'));
     }
 
     // Получаем выбранное здание или используем первое

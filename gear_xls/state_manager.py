@@ -21,6 +21,7 @@ from gear_xls.runtime_paths import (
     get_schedule_html_path,
 )
 from gear_xls.day_constants import DAY_TO_WEEKDAY, TRIAL_ONLY_DAYS, WEB_EDITOR_DAY_SET
+from gear_xls.lesson_type_utils import is_legacy_rental_subject, validate_rental_dates
 
 try:
     from .base_schedule_manager import (
@@ -28,7 +29,8 @@ try:
         base_has_group_lessons_in_column,
         get_base_revision,
         get_base_schedule,
-        publish_base,
+        publish_base as _publish_base,
+        BaseScheduleValidationError,
     )
 except ImportError:
     from base_schedule_manager import (
@@ -36,7 +38,8 @@ except ImportError:
         base_has_group_lessons_in_column,
         get_base_revision,
         get_base_schedule,
-        publish_base,
+        publish_base as _publish_base,
+        BaseScheduleValidationError,
     )
 
 
@@ -62,6 +65,8 @@ def _normalize_block(block):
     normalized = {}
     for key, value in (block or {}).items():
         normalized[key] = value.strip() if isinstance(value, str) else value
+    if normalized.get("lesson_type") == "rental" and not normalized.get("subject"):
+        normalized["subject"] = "Vermietung"
     return normalized
 
 
@@ -189,16 +194,15 @@ def _parse_embedded_individual_block(attrs_text, body):
         unescape(line)
         for line in (
             re.sub(r"<[^>]+>", "", raw_line).strip()
-            for raw_line in re.sub(r"<br\s*/?>", "\n", body, flags=re.I).splitlines()
+            for raw_line in re.split(r"<br\s*/?>", body, flags=re.I)
         )
-        if line
     ]
     time_match = None
     time_index = -1
     block = None
     error = None
 
-    if lesson_type not in ("individual", "nachhilfe", "trial"):
+    if lesson_type not in ("individual", "nachhilfe", "trial", "rental"):
         return None
 
     for index in range(len(lines) - 1, -1, -1):
@@ -213,7 +217,7 @@ def _parse_embedded_individual_block(attrs_text, body):
         return None
 
     block = {
-        "id": str(uuid.uuid4()),
+        "id": attrs.get("block-id") or str(uuid.uuid4()),
         "day": (attrs.get("day") or "").strip(),
         "building": (attrs.get("building") or "").strip(),
         "room": lines[time_index - 1].strip(),
@@ -241,6 +245,12 @@ def _parse_embedded_individual_block(attrs_text, body):
 
     if color_match:
         block["color"] = color_match.group(1).strip()
+
+    if lesson_type == "rental":
+        try:
+            block["rental_dates"] = json.loads(attrs.get("rental-dates") or "[]")
+        except ValueError:
+            return None
 
     if attrs.get("start-row") is not None:
         block["start_row"] = _to_int_or_none(attrs.get("start-row"))
@@ -300,9 +310,9 @@ def _bootstrap_individual_from_html_if_needed(state):
 
 
 _ROLE_ALLOWED_TYPES = {
-    "admin":     {"group", "individual", "nachhilfe", "trial"},
-    "editor":    {"individual", "nachhilfe", "trial"},
-    "organizer": {"trial"},
+    "admin":     {"individual", "nachhilfe", "trial", "rental"},
+    "editor":    {"individual", "nachhilfe", "trial", "rental"},
+    "organizer": {"trial", "rental"},
 }
 
 
@@ -340,6 +350,8 @@ def _eligible_trial_dates_for_cleanup(block):
     if not isinstance(block, dict):
         return None
     if block.get("lesson_type") != "trial":
+        return None
+    if is_legacy_rental_subject(block.get("subject")):
         return None
 
     trial_dates = block.get("trial_dates")
@@ -416,15 +428,31 @@ def _finish_mutation(value, error, state, cleanup, should_write):
 
 def _validate_block(block, role):
     for field in ("day", "start_time", "end_time", "lesson_type", "subject", "room", "building"):
-        if not str(block.get(field, "")).strip():
+        if not isinstance(block.get(field), str) or not block[field].strip():
             return f"{field} required"
     if block["day"] not in VALID_DAYS:
         return "Invalid day"
     allowed = _ROLE_ALLOWED_TYPES.get(role)
-    if allowed is not None and block.get("lesson_type") not in allowed:
+    if block.get("lesson_type") not in (allowed or set()):
         return "Forbidden lesson_type"
-    if block["day"] in TRIAL_ONLY_DAYS and block.get("lesson_type") != "trial":
+    if block["day"] in TRIAL_ONLY_DAYS and block.get("lesson_type") not in ("trial", "rental"):
         return "Sunday is allowed only for trial lessons"
+    if block.get("lesson_type") == "rental":
+        for field in ("teacher", "students"):
+            if field in block and not isinstance(block[field], str):
+                return f"{field} must be a string"
+        for field in ("start_time", "end_time"):
+            if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", block[field]):
+                return f"{field} invalid"
+        if block["end_time"] <= block["start_time"]:
+            return "end_time must be after start_time"
+        dates = block.get("rental_dates", [])
+        error = validate_rental_dates(block["day"], dates)
+        if error:
+            return error
+        block["rental_dates"] = sorted(set(dates))
+    else:
+        block.pop("rental_dates", None)
     if block.get("lesson_type") == "trial":
         dates = block.get("trial_dates", [])
         if not isinstance(dates, list):
@@ -512,9 +540,13 @@ def update_block(block_id, updates, role):
             for index, block in enumerate(state["blocks"]):
                 if block.get("id") != block_id:
                     continue
+                if block.get("lesson_type") not in _ROLE_ALLOWED_TYPES.get(role, set()):
+                    return _finish_mutation(None, "Forbidden lesson_type", state, cleanup, cleanup["removed"] > 0)
                 merged = dict(block)
                 merged.update(_normalize_block(updates))
                 merged["id"] = block_id
+                if block.get("lesson_type") == "rental" and merged.get("lesson_type") != "rental":
+                    return _finish_mutation(None, "Rental lesson_type cannot be changed", state, cleanup, cleanup["removed"] > 0)
                 error = _validate_block(merged, role)
                 if error:
                     return _finish_mutation(None, error, state, cleanup, cleanup["removed"] > 0)
@@ -536,7 +568,7 @@ def delete_block(block_id, role=None):
             if target is None:
                 error = "EXPIRED_TRIAL_PRUNED" if block_id in cleanup.get("removed_ids", []) else None
                 return _finish_mutation(False, error, state, cleanup, cleanup["removed"] > 0)
-            if role == "organizer" and target.get("lesson_type") != "trial":
+            if target.get("lesson_type") not in _ROLE_ALLOWED_TYPES.get(role, set()):
                 return _finish_mutation(False, "FORBIDDEN", state, cleanup, cleanup["removed"] > 0)
             state["blocks"] = [b for b in state["blocks"] if b.get("id") != block_id]
             return _finish_mutation(True, None, state, cleanup, True)
@@ -584,10 +616,22 @@ def individual_column_has_non_trial_blocks(building, day, room):
         block.get("building") == building
         and block.get("day") == day
         and block.get("room") == room
-        and block.get("lesson_type") != "trial"
+        and block.get("lesson_type") not in ("trial", "rental")
         for block in state.get("blocks", [])
         if isinstance(block, dict)
     )
+
+
+def publish_base(blocks, published_by, expected_base_revision=None):
+    # Preserve the managed origin even if an outdated client labels it group.
+    with _ind_mutex:
+        with _locked_individual_file():
+            managed_ids = {b.get("id") for b in _read_individual()["blocks"] if isinstance(b, dict)}
+    for block in blocks or []:
+        if (isinstance(block, dict) and block.get("lesson_type") == "group"
+                and block.get("id") and block["id"] in managed_ids):
+            raise BaseScheduleValidationError("Managed block cannot be published as group", code="MANAGED_BLOCK_IN_BASE")
+    return _publish_base(blocks, published_by, expected_base_revision)
 
 
 def delete_column_blocks(building, day, room):

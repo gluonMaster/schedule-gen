@@ -2,6 +2,15 @@
 // Single-responsibility: synchronise block innerHTML from positional data attributes.
 // Depends on: column_helpers.js (extractRoomFromDayHeader), global vars gridStart, timeInterval.
 
+function readBlockContentLines(block) {
+    return (block.innerHTML || '').split(/<br\s*\/?>/i).map(function(part) {
+        var decoder = document.createElement('div');
+        decoder.innerHTML = part;
+        return (decoder.textContent || '').trim();
+    });
+}
+window.readBlockContentLines = readBlockContentLines;
+
 function syncBlockContent(block) {
     var day      = block.getAttribute('data-day');
     var colIndex = parseInt(block.getAttribute('data-col-index'), 10);
@@ -67,9 +76,10 @@ function syncBlockContent(block) {
 
     var newHTML = subject + '<br>' + teacher + '<br>' + students + '<br>' + newRoom + '<br>' + newTimeStr;
 
-    // Restore trial dates line for trial blocks
-    if (block.getAttribute('data-lesson-type') === 'trial') {
-        var rawDates = block.getAttribute('data-trial-dates');
+    // Keep dates visible after drag/resize without changing their meaning.
+    var lessonType = block.getAttribute('data-lesson-type');
+    if (lessonType === 'trial' || lessonType === 'rental') {
+        var rawDates = block.getAttribute(lessonType === 'rental' ? 'data-rental-dates' : 'data-trial-dates');
         if (rawDates) {
             try {
                 var trialDates = JSON.parse(rawDates);
@@ -108,7 +118,7 @@ function syncBlockContent(block) {
     if (typeof updateBlockLessonType === 'function') {
         updateBlockLessonType(block);
     }
-    if (block.getAttribute('data-lesson-type') === 'group' && typeof window.normalizeGroupBlockRuntimeState === 'function') {
+    if (!block.getAttribute('data-block-id') && block.getAttribute('data-lesson-type') === 'group' && typeof window.normalizeGroupBlockRuntimeState === 'function') {
         window.normalizeGroupBlockRuntimeState(block);
     }
     if (typeof reapplyLessonTypeFilter === 'function') {

@@ -16,6 +16,7 @@ from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Alignment, Border, Side, Font
 from openpyxl.utils.dataframe import dataframe_to_rows
 from gear_xls.day_constants import TRIAL_ONLY_DAYS, WEB_EDITOR_DAY_SET
+from gear_xls.lesson_type_utils import validate_rental_dates
 
 # Настройка логирования
 logging.basicConfig(
@@ -48,7 +49,16 @@ def validate_schedule_data_for_export(schedule_data):
                 f"Schedule row {index} has invalid day: {day or '<empty>'}",
                 code="INVALID_EXPORT_DAY",
             )
-        if day in TRIAL_ONLY_DAYS and lesson_type != "trial":
+        if lesson_type == "rental":
+            raw_dates = activity.get("rental_dates_json", activity.get("rental_dates", []))
+            try:
+                dates = json.loads(raw_dates) if isinstance(raw_dates, str) else raw_dates
+            except ValueError as exc:
+                raise ExcelExportValidationError("Invalid rental_dates_json") from exc
+            error = validate_rental_dates(day, dates)
+            if error:
+                raise ExcelExportValidationError(error)
+        if day in TRIAL_ONLY_DAYS and lesson_type not in ("trial", "rental"):
             raise ExcelExportValidationError(
                 "Sunday is allowed only for trial lessons",
                 code="SUNDAY_REGULAR_FORBIDDEN",

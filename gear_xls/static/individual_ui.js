@@ -114,13 +114,13 @@
     var lessonType = getBlockLessonType(block);
 
     if (role === "admin") {
-      return true;
+      return ["group", "individual", "nachhilfe", "trial", "rental"].indexOf(lessonType) !== -1;
     }
     if (role === "editor") {
-      return lessonType !== "group";
+      return ["individual", "nachhilfe", "trial", "rental"].indexOf(lessonType) !== -1;
     }
     if (role === "organizer") {
-      return lessonType === "trial";
+      return lessonType === "trial" || lessonType === "rental";
     }
     return false;
   }
@@ -135,8 +135,8 @@
 
     if (role === "organizer") {
       return action === "delete"
-        ? "Организатор может удалять только пробные/разовые занятия."
-        : "Организатор может редактировать только пробные/разовые занятия.";
+        ? "Организатор может удалять trial-занятия и аренду."
+        : "Организатор может редактировать trial-занятия и аренду.";
     }
     if (role === "editor" && lessonType === "group") {
       return action === "delete"
@@ -248,6 +248,7 @@
       handleIndividualRevision: handleIndividualRevision,
       flushPendingRevision: flushPendingRevision,
       refreshIndividualLayer: refreshIndividualLayer,
+      enhanceCreateDialog: enhanceCreateDialog,
     };
     refreshIndividualLayer();
   }
@@ -273,9 +274,7 @@
 
       explicitType = (block.getAttribute("data-lesson-type") || "").trim();
       if (
-        block.getAttribute("data-block-id") &&
-        explicitType &&
-        explicitType !== "group"
+        ["group", "individual", "nachhilfe", "trial", "rental"].indexOf(explicitType) !== -1
       ) {
         syncLessonTypeClass(block, explicitType);
         return explicitType;
@@ -305,7 +304,7 @@
     }
 
     block.className = (block.className || "")
-      .replace(/\slesson-type-(group|individual|nachhilfe|trial)\b/g, "")
+      .replace(/\slesson-type-(group|individual|nachhilfe|trial|rental)\b/g, "")
       .trim();
     block.classList.add("lesson-type-" + normalizedType);
     block.setAttribute("data-lesson-type", normalizedType);
@@ -469,7 +468,6 @@
         trialOption.textContent = "Пробное / разовое (trial)";
         typeSelect.appendChild(trialOption);
         typeSelect.value = "trial";
-        typeSelect.disabled = true;
       } else {
         autoOption = document.createElement("option");
         autoOption.value = "";
@@ -494,6 +492,20 @@
         typeWrapper,
         anchor && anchor.parentNode === form ? anchor.nextSibling : buttonRow
       );
+    }
+
+    // Also enhance an older generated dialog that already contains trial controls.
+    typeSelect.disabled = false;
+    if (!typeSelect.querySelector('option[value="rental"]')) {
+      var rentalOption = document.createElement("option");
+      rentalOption.value = "rental";
+      rentalOption.textContent = "Аренда (Vermietung)";
+      typeSelect.appendChild(rentalOption);
+    }
+    if (!form.querySelector("#create-rental-dates-section")) {
+      var rentalSection = window.TrialUI.buildRentalDatesSection([]);
+      rentalSection.id = "create-rental-dates-section";
+      form.insertBefore(rentalSection, form.querySelector(".button-row"));
     }
 
     if (!datesSection) {
@@ -525,16 +537,28 @@
     var typeHint = form ? form.querySelector("#create-lesson-type-hint") : null;
     var datesSection = form ? form.querySelector("#create-trial-dates-section") : null;
     var isTrial = !!(typeSelect && typeSelect.value === "trial");
+    var isRental = !!(typeSelect && typeSelect.value === "rental");
+    var rentalSection = form ? form.querySelector("#create-rental-dates-section") : null;
 
     if (!form || !typeSelect || !datesSection) {
       return;
     }
 
     datesSection.style.display = isTrial ? "" : "none";
+    if (rentalSection) rentalSection.style.display = isRental ? "" : "none";
+    var subjectField = form.querySelector("#new-subject");
+    if (isRental && subjectField && !subjectField.value.trim()) subjectField.value = "Vermietung";
+    [["#new-subject", isRental ? "Название аренды:" : "Предмет:"],
+     ["#new-teacher", isRental ? "Арендатор / контакт:" : "Преподаватель:"],
+     ["#new-students", isRental ? "Описание / организация:" : "Группа/Ученики:"]].forEach(function (item) {
+      var field = form.querySelector(item[0]);
+      var label = field && field.closest("label");
+      if (label && label.firstChild && label.firstChild.nodeType === 3) label.firstChild.textContent = item[1];
+    });
     if (typeHint) {
       typeHint.textContent =
-        currentRole() === "organizer"
-          ? "Организатор создаёт только trial-занятия. Ниже обязательно укажите даты проведения."
+        isRental
+          ? "Одна запись — одно помещение. Время окончания — конец брони."
           : isTrial
             ? "Для trial-занятия ниже нужно указать одну или несколько дат проведения."
             : "Оставьте авто-режим для обычного индивидуального или группового занятия.";
@@ -751,7 +775,7 @@
   function removeIndividualBlocks() {
     document
       .querySelectorAll(
-        '.activity-block[data-block-id], .activity-block[data-lesson-type="individual"], .activity-block[data-lesson-type="nachhilfe"], .activity-block[data-lesson-type="trial"]'
+        '.activity-block[data-block-id], .activity-block[data-lesson-type="individual"], .activity-block[data-lesson-type="nachhilfe"], .activity-block[data-lesson-type="trial"], .activity-block[data-lesson-type="rental"]'
       )
       .forEach(function (block) {
         if (activeEditedBlock === block) {
@@ -793,6 +817,7 @@
       " lesson-type-" +
       (block.lesson_type || "individual");
     element.setAttribute("data-block-id", block.id || "");
+    element.setAttribute("data-source-layer", "individual");
     element.setAttribute("data-day", day);
     element.setAttribute("data-col-index", String(colIndex));
     element.setAttribute("data-building", building);
@@ -814,6 +839,9 @@
     }
 
     // Trial-specific: store dates in data attribute, apply expired style
+    if (block.lesson_type === "rental") {
+      element.setAttribute("data-rental-dates", JSON.stringify(block.rental_dates || []));
+    }
     if (block.lesson_type === "trial") {
       var trialDates = Array.isArray(block.trial_dates) ? block.trial_dates : [];
       element.setAttribute("data-trial-dates", JSON.stringify(trialDates));
@@ -836,8 +864,9 @@
     ];
 
     // Show trial dates line in block body
-    if (block.lesson_type === "trial" && Array.isArray(block.trial_dates) && block.trial_dates.length > 0) {
-      var datesDisplay = block.trial_dates.map(function (d) {
+    var displayDates = block.lesson_type === "rental" ? block.rental_dates : block.trial_dates;
+    if ((block.lesson_type === "trial" || block.lesson_type === "rental") && Array.isArray(displayDates) && displayDates.length > 0) {
+      var datesDisplay = displayDates.map(function (d) {
         var p = d.split("-");
         return p.length === 3 ? p[2] + "." + p[1] + "." + p[0] : d;
       }).join(", ");
@@ -1180,9 +1209,9 @@
     if (
       block &&
       currentRole() === "organizer" &&
-      block.getAttribute("data-lesson-type") !== "trial"
+      ["trial", "rental"].indexOf(getBlockLessonType(block)) === -1
     ) {
-      alert("Организатор может редактировать только пробные/разовые занятия.");
+      alert("Организатор может редактировать trial-занятия и аренду.");
       return;
     }
     if (!block || typeof window.openEditDialog !== "function") {
@@ -1215,6 +1244,12 @@
       form.removeAttribute("data-block-id");
     }
     activeEditedBlock = block;
+    if (getBlockLessonType(block) === "rental" && window.TrialUI && !form.querySelector("#edit-rental-dates-section")) {
+      var dates = JSON.parse(block.getAttribute("data-rental-dates") || "[]");
+      var section = window.TrialUI.buildRentalDatesSection(dates);
+      section.id = "edit-rental-dates-section";
+      form.insertBefore(section, form.querySelector(".button-row"));
+    }
   }
 
   function resolveEditedBlock(form) {
@@ -1247,6 +1282,9 @@
         "data-col-index": block.getAttribute("data-col-index"),
         "data-lesson-type": block.getAttribute("data-lesson-type"),
         "data-trial-dates": block.getAttribute("data-trial-dates"),
+        "data-rental-dates": block.getAttribute("data-rental-dates"),
+        "data-source-layer": block.getAttribute("data-source-layer"),
+        "data-explicit-lesson-type": block.getAttribute("data-explicit-lesson-type"),
         "data-room": block.getAttribute("data-room"),
         "data-start-row": block.getAttribute("data-start-row"),
         "data-row-span": block.getAttribute("data-row-span"),
@@ -1280,8 +1318,8 @@
   }
 
   function buildBlockPayloadFromElement(block) {
-    var parts = (block.innerHTML || "").split(/<br\s*\/?>/i);
-    var timeText = stripHtml(parts[4] || "").trim();
+    var parts = window.readBlockContentLines(block);
+    var timeText = (parts[4] || "").trim();
     var timeInfo = parseTimeRange(timeText);
     var lessonType = getBlockLessonType(block);
     var colIndex = toInteger(block.getAttribute("data-col-index"), -1);
@@ -1299,7 +1337,7 @@
       !timeInfo ||
       !block.getAttribute("data-building") ||
       !block.getAttribute("data-day") ||
-      !stripHtml(parts[3] || "").trim() ||
+      !(parts[3] || "").trim() ||
       !getBlockSubject(block)
     ) {
       return null;
@@ -1316,10 +1354,10 @@
     var payload = {
       building: (block.getAttribute("data-building") || "").trim(),
       day: (block.getAttribute("data-day") || "").trim(),
-      room: stripHtml(parts[3] || "").trim(),
+      room: (parts[3] || "").trim(),
       subject: getBlockSubject(block).trim(),
-      teacher: stripHtml(parts[1] || "").trim(),
-      students: stripHtml(parts[2] || "").trim(),
+      teacher: (parts[1] || "").trim(),
+      students: (parts[2] || "").trim(),
       lesson_type: lessonType,
       start_time: timeInfo.start_time,
       end_time: timeInfo.end_time,
@@ -1330,6 +1368,12 @@
     };
     if (lessonType === "trial" && Array.isArray(trialDates)) {
       payload.trial_dates = trialDates;
+    }
+    if (lessonType === "rental") {
+      try {
+        payload.rental_dates = JSON.parse(block.getAttribute("data-rental-dates") || "[]");
+        if (!Array.isArray(payload.rental_dates)) return null;
+      } catch (e) { return null; }
     }
     return payload;
   }
@@ -1479,20 +1523,20 @@
     }
 
     if (payload.lesson_type === "group") {
-      if (role === "editor") {
+      if (role !== "admin") {
         stopDomMutation(event);
         alert("Недостаточно прав для создания этого типа занятия.");
       }
       return;
     }
 
-    if (payload.lesson_type !== "trial" && role === "organizer") {
+    if (["trial", "rental"].indexOf(payload.lesson_type) === -1 && role === "organizer") {
       stopDomMutation(event);
-      alert("Организатор может создавать только пробные/разовые занятия.");
+      alert("Организатор может создавать trial-занятия и аренду.");
       return;
     }
 
-    if (payload.day === "So" && payload.lesson_type !== "trial") {
+    if (payload.day === "So" && payload.lesson_type !== "trial" && !(payload.lesson_type === "rental" && payload.rental_dates.length)) {
       stopDomMutation(event);
       alert("Воскресенье доступно только для trial-занятий.");
       return;
@@ -1558,9 +1602,9 @@
       return;
     }
 
-    if (currentLessonType !== "trial" && currentRole() === "organizer") {
+    if (["trial", "rental"].indexOf(currentLessonType) === -1 && currentRole() === "organizer") {
       stopDomMutation(event);
-      alert("Организатор может редактировать только пробные/разовые занятия.");
+      alert("Организатор может редактировать trial-занятия и аренду.");
       return;
     }
 
@@ -1636,9 +1680,9 @@
       return;
     }
 
-    if (lessonType !== "trial" && currentRole() === "organizer") {
+    if (["trial", "rental"].indexOf(lessonType) === -1 && currentRole() === "organizer") {
       stopDomMutation(event);
-      alert("Организатор может удалять только пробные/разовые занятия.");
+      alert("Организатор может удалять trial-занятия и аренду.");
       return;
     }
 
@@ -1914,6 +1958,9 @@
     if (resolvedType === "trial" && window.TrialUI) {
       createPayload.trial_dates = collectCreateTrialDates(form);
     }
+    if (resolvedType === "rental" && window.TrialUI) {
+      createPayload.rental_dates = window.TrialUI.collectRentalDates(form.querySelector("#create-rental-dates-section"));
+    }
     return createPayload;
   }
 
@@ -1921,6 +1968,7 @@
     var typeSelectEl = form ? form.querySelector("#new-lesson-type") : null;
     var explicitType = typeSelectEl ? typeSelectEl.value : "";
 
+    if (explicitType === "rental") return "rental";
     if (currentRole() === "organizer" || explicitType === "trial") {
       return "trial";
     }
@@ -1956,7 +2004,7 @@
     }
 
     var currentType = getBlockLessonType(block);
-    var editResolvedType = currentType === "trial" ? "trial" : inferLessonType(subject);
+    var editResolvedType = currentType;
 
     var editPayload = {
       building: building,
@@ -1977,6 +2025,9 @@
       var editDatesSection = form ? form.querySelector("#edit-trial-dates-section") : null;
       editPayload.trial_dates = window.TrialUI.collectTrialDates(editDatesSection || form);
     }
+    if (editResolvedType === "rental" && window.TrialUI) {
+      editPayload.rental_dates = window.TrialUI.collectRentalDates(form.querySelector("#edit-rental-dates-section"));
+    }
     return editPayload;
   }
 
@@ -1994,6 +2045,9 @@
     }
     if (resolveCreateLessonType(form) === "trial" && collectCreateTrialDates(form).length === 0) {
       return "Для trial-занятия нужно указать хотя бы одну дату проведения.";
+    }
+    if (resolveCreateLessonType(form) === "rental") {
+      return window.TrialUI.validateRentalDates(form.querySelector("#create-rental-dates-section"), getFieldValue(form, "#new-day"));
     }
     if (getFieldValue(form, "#new-day") === "So" && resolveCreateLessonType(form) !== "trial") {
       return "Воскресенье доступно только для trial-занятий.";
@@ -2013,6 +2067,9 @@
 
     if (error) {
       return error;
+    }
+    if (editedBlock && getBlockLessonType(editedBlock) === "rental") {
+      return window.TrialUI.validateRentalDates(form.querySelector("#edit-rental-dates-section"), editedBlock.getAttribute("data-day"));
     }
     if (
       editedBlock &&
@@ -2199,7 +2256,7 @@
     ).some(function (block) {
       return (
         toInteger(block.getAttribute("data-col-index"), -1) === colIndex &&
-        getBlockLessonType(block) !== "trial"
+        ["trial", "rental"].indexOf(getBlockLessonType(block)) === -1
       );
     });
   }

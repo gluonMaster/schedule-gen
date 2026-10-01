@@ -190,7 +190,7 @@
   function isGroupBlockElement(block) {
     var lessonType;
 
-    if (!block) {
+    if (!block || block.getAttribute("data-block-id") || block.getAttribute("data-source-layer") === "individual") {
       return false;
     }
 
@@ -630,6 +630,7 @@
       window.alert("Функция сбора данных расписания недоступна.");
       return null;
     }
+    blocks = blocks.filter(isBasePublicationBlock);
     if (buildGroupSignature(blocks) === (_publishedGroupSignature || "[]")) {
       window.alert("Нет изменений для публикации.");
       return null;
@@ -830,6 +831,8 @@
           duration: timeRange.duration,
           color: window.getComputedStyle(block).backgroundColor || "",
           lesson_type: block.getAttribute("data-lesson-type") || "group",
+          block_id: block.getAttribute("data-block-id") || "",
+          source_layer: block.getAttribute("data-source-layer") || "base",
         });
       });
     });
@@ -847,9 +850,7 @@
 
   function normalizeBlocksForSignature(blocks) {
     return (blocks || [])
-      .filter(function (block) {
-        return block && block.lesson_type === "group";
-      })
+      .filter(isBasePublicationBlock)
       .map(function (block) {
         return {
           building: String(block.building || "").trim(),
@@ -867,6 +868,10 @@
       .sort(function (a, b) {
         return JSON.stringify(a).localeCompare(JSON.stringify(b));
       });
+  }
+
+  function isBasePublicationBlock(block) {
+    return block && block.lesson_type === "group" && !block.block_id && block.source_layer !== "individual";
   }
 
   function normalizeColorForSignature(value) {
@@ -892,16 +897,7 @@
   }
 
   function extractBlockLines(block) {
-    return (block.innerHTML || "")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<[^>]*>/g, "")
-      .split("\n")
-      .map(function (line) {
-        return line.trim();
-      })
-      .filter(function (line) {
-        return !!line;
-      });
+    return window.readBlockContentLines(block);
   }
 
   function resolveRoomName(table, day, colIndex) {
@@ -1033,6 +1029,7 @@
     document
       .querySelectorAll('.activity-block[data-lesson-type="group"]')
       .forEach(function (block) {
+        if (!isGroupBlockElement(block)) return;
         if (block.parentNode) {
           block.parentNode.removeChild(block);
         }

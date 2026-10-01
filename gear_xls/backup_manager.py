@@ -26,6 +26,7 @@ from gear_xls.day_constants import (
     TRIAL_ONLY_DAYS,
     WEB_EDITOR_DAY_SET,
 )
+from gear_xls.lesson_type_utils import validate_rental_dates
 
 
 BACKUP_SCHEMA = "schedgen.web_editor_backup"
@@ -64,7 +65,7 @@ EXPECTED_CONTENT_PATH_SET = set(EXPECTED_CONTENT_PATHS)
 VALID_DAYS = WEB_EDITOR_DAY_SET
 VALID_PUBLIC_DAYS = PUBLIC_SCHEDULE_DAY_SET
 VALID_BASE_LESSON_TYPES = {"group"}
-VALID_INDIVIDUAL_LESSON_TYPES = {"individual", "nachhilfe", "trial"}
+VALID_INDIVIDUAL_LESSON_TYPES = {"individual", "nachhilfe", "trial", "rental"}
 TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 def _joined_marker(*parts: str) -> str:
@@ -372,7 +373,13 @@ def validate_individual_state(data: Any, *, label: str = "individual_lessons.jso
                 status_code=400,
             )
         seen_ids.add(block_id)
-        if block["day"] in TRIAL_ONLY_DAYS and block["lesson_type"] != "trial":
+        if block["lesson_type"] == "rental":
+            error = validate_rental_dates(block["day"], block.get("rental_dates", []))
+            if error:
+                raise BackupValidationError(
+                    f"{label} block {index}: {error}", code="INVALID_JSON_STATE", status_code=400,
+                )
+        if block["day"] in TRIAL_ONLY_DAYS and block["lesson_type"] not in ("trial", "rental"):
             raise BackupValidationError(
                 f"{label} block {index}: Sunday is allowed only for trial lessons",
                 code="INVALID_JSON_STATE",

@@ -189,6 +189,13 @@ class HTMLBlockGenerator:
             trial_dates_attr = (
                 f" data-trial-dates='{html_escape(json.dumps(trial_dates, ensure_ascii=False), quote=True)}' "
             )
+        if lesson_type == 'rental':
+            trial_dates_attr = f" data-rental-dates='{html_escape(json.dumps(interval.get('rental_dates', [])), quote=True)}' "
+        managed_attrs = ""
+        if lesson_type in ('individual', 'nachhilfe', 'trial', 'rental'):
+            managed_attrs = " data-source-layer='individual' "
+            if interval.get('id'):
+                managed_attrs += f"data-block-id='{html_escape(str(interval['id']), quote=True)}' "
 
         # Отладочная информация для диагностики
         logger.debug(f"Генерация блока: день='{day}', колонка={col_index}, здание='{building}'")
@@ -211,6 +218,7 @@ class HTMLBlockGenerator:
             f"data-room='{html_escape(room, quote=True)}' "
             f"data-lesson-type='{lesson_type}' "
             f"{trial_dates_attr}"
+            f"{managed_attrs}"
             f"data-start-time='{start_time}' "
             f"data-end-time='{end_time}' "
             f"data-start-row='{start_row}' "
@@ -286,7 +294,7 @@ class HTMLBlockGenerator:
         subject = html_escape(interval.get('subject') or 'Не указано')
         teacher = html_escape(interval.get('teacher') or '')
         students = html_escape(interval.get('students') or '')
-        room_display = html_escape(interval.get('room_display') or '')
+        room_display = html_escape(interval.get('room_display') or normalize_room_name(interval.get('room'), interval.get('building')) or '')
         start_time = minutes_to_time(interval.get('start', 0))
         end_time = minutes_to_time(interval.get('end', 0))
         lesson_type = _resolve_lesson_type(interval)
@@ -294,14 +302,17 @@ class HTMLBlockGenerator:
         
         content_parts = [
             f"<strong>{subject}</strong><br>",
-            f"{teacher}<br>" if teacher else "",
-            f"{students}<br>" if students else "",
-            f"{room_display}<br>" if room_display else "",
+            f"{teacher}<br>",
+            f"{students}<br>",
+            f"{room_display}<br>",
             f"{start_time}-{end_time}"
         ]
 
         if lesson_type == 'trial' and trial_dates:
             dates_display = ", ".join(_format_trial_date(date_value) for date_value in trial_dates)
+            content_parts.append(f"<br>&#128197; {html_escape(dates_display)}")
+        if lesson_type == 'rental' and interval.get('rental_dates'):
+            dates_display = ", ".join(_format_trial_date(value) for value in interval['rental_dates'])
             content_parts.append(f"<br>&#128197; {html_escape(dates_display)}")
         
         return "".join(content_parts)

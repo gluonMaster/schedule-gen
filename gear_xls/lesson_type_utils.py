@@ -1,3 +1,31 @@
+import re
+from datetime import date
+
+from gear_xls.day_constants import DAY_TO_WEEKDAY
+
+
+def is_legacy_rental_subject(subject):
+    """Exact compatibility marker; never used to reclassify an edited block."""
+    return isinstance(subject, str) and subject.strip().casefold() == "vermietung"
+
+
+def validate_rental_dates(day, dates):
+    if not isinstance(dates, list):
+        return "rental_dates must be a list"
+    for value in dates:
+        if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            return "rental_dates entries must be YYYY-MM-DD strings"
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError:
+            return f"rental_dates contains invalid date: {value}"
+        if parsed.weekday() != DAY_TO_WEEKDAY.get(day):
+            return f"rental_dates contains date {value} not matching block day {day}"
+    if day == "So" and not dates:
+        return "Sunday rental must contain at least one date"
+    return None
+
+
 def classify_lesson_type(subject: str) -> str:
     """
     Classifies a lesson by type based on the subject string.

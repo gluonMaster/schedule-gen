@@ -210,6 +210,60 @@
     return dates;
   }
 
+  function buildRentalDatesSection(existingDates) {
+    var section = document.createElement("div");
+    var label = document.createElement("label");
+    var frequency = document.createElement("select");
+    var datesSection = buildTrialDatesSection(existingDates);
+    label.textContent = "Регулярность аренды:";
+    frequency.className = "rental-frequency";
+    [["weekly", "Еженедельно"], ["dates", "По датам"]].forEach(function (item) {
+      var option = document.createElement("option");
+      option.value = item[0];
+      option.textContent = item[1];
+      frequency.appendChild(option);
+    });
+    frequency.value = Array.isArray(existingDates) && existingDates.length ? "dates" : "weekly";
+    datesSection.querySelector("label").textContent = "Даты аренды:";
+    function syncFrequency() {
+      datesSection.style.display = frequency.value === "dates" ? "" : "none";
+    }
+    frequency.addEventListener("change", syncFrequency);
+    label.appendChild(frequency);
+    section.appendChild(label);
+    section.appendChild(datesSection);
+    syncFrequency();
+    return section;
+  }
+
+  function collectRentalDates(section) {
+    var frequency = section && section.querySelector(".rental-frequency");
+    return frequency && frequency.value === "dates" ? collectTrialDates(section) : [];
+  }
+
+  function validateRentalDates(section, day) {
+    var frequency = section && section.querySelector(".rental-frequency");
+    var dates = collectRentalDates(section);
+    var weekdays = { Mo: 1, Di: 2, Mi: 3, Do: 4, Fr: 5, Sa: 6, So: 0 };
+    if (frequency && frequency.value === "dates" && !dates.length) {
+      return "Укажите хотя бы одну дату аренды.";
+    }
+    if (day === "So" && !dates.length) {
+      return "Для аренды в воскресенье выберите «По датам» и укажите даты.";
+    }
+    for (var i = 0; i < dates.length; i += 1) {
+      var parsed = new Date(dates[i] + "T12:00:00Z");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dates[i]) || isNaN(parsed.getTime()) ||
+          parsed.toISOString().slice(0, 10) !== dates[i]) {
+        return "Некорректная дата аренды: " + dates[i];
+      }
+      if (parsed.getUTCDay() !== weekdays[day]) {
+        return "Дата аренды " + dates[i] + " не соответствует дню " + day + ".";
+      }
+    }
+    return null;
+  }
+
   function resetConvertButton(button) {
     button.disabled = false;
     button.textContent = "Сделать регулярным занятием";
@@ -296,6 +350,9 @@
     refreshTrialBlocks: refreshTrialBlocks,
     buildTrialDatesSection: buildTrialDatesSection,
     collectTrialDates: collectTrialDates,
+    buildRentalDatesSection: buildRentalDatesSection,
+    collectRentalDates: collectRentalDates,
+    validateRentalDates: validateRentalDates,
     renderConvertButton: renderConvertButton,
   };
 

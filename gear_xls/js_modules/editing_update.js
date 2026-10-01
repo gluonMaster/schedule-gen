@@ -103,9 +103,9 @@ function openEditDialog(block, origLeft, origTop, building) {
         typeof window.USER_ROLE !== 'undefined' &&
         window.USER_ROLE === 'organizer' &&
         block &&
-        block.getAttribute('data-lesson-type') !== 'trial'
+        ['trial', 'rental'].indexOf(block.getAttribute('data-lesson-type')) === -1
     ) {
-        alert("Организатор может редактировать только пробные/разовые занятия.");
+        alert("Организатор может редактировать trial-занятия и аренду.");
         return;
     }
 
@@ -137,7 +137,7 @@ function openEditDialog(block, origLeft, origTop, building) {
     var currentDay = block.getAttribute('data-day');
     var currentColIndex = block.getAttribute('data-col-index');
     var originalLessonType = (block.getAttribute('data-lesson-type') || '').trim();
-    var wasExistingGroupBlock = originalLessonType === 'group' || (!originalLessonType && !block.getAttribute('data-block-id'));
+    var wasExistingGroupBlock = !block.getAttribute('data-block-id') && (!originalLessonType || originalLessonType === 'group');
     
     // ИСПОЛЬЗУЕМ НОВЫЙ BuildingService вместо дублированной функции
     var currentBuilding = building || block.getAttribute('data-building') || 
@@ -158,9 +158,9 @@ function openEditDialog(block, origLeft, origTop, building) {
     }
 
     // Разбиваем HTML по тегам <br>
-    var parts = blockContent.split('<br>');
+    var parts = window.readBlockContentLines(block);
     // Удаляем теги из первого элемента (subject)
-    var cleanSubject = parts[0].replace(/<\/?[^>]+(>|$)/g, "").trim();
+    var cleanSubject = (parts[0] || '').trim();
     subject = cleanSubject;
     
     // Получаем остальные значения
@@ -196,20 +196,20 @@ function openEditDialog(block, origLeft, origTop, building) {
                     </select>
                 </label>
                 <label>
-                    Предмет:
-                    <input type="text" id="edit-subject" value="${subject}" required>
+                    ${originalLessonType === 'rental' ? 'Название аренды:' : 'Предмет:'}
+                    <input type="text" id="edit-subject" value="${escapeEditField(subject)}" required>
                 </label>
                 <label>
-                    Преподаватель:
-                    <input type="text" id="edit-teacher" value="${teacher}">
+                    ${originalLessonType === 'rental' ? 'Арендатор / контакт:' : 'Преподаватель:'}
+                    <input type="text" id="edit-teacher" value="${escapeEditField(teacher)}">
                 </label>
                 <label>
-                    Группа/Ученики:
-                    <input type="text" id="edit-students" value="${students}">
+                    ${originalLessonType === 'rental' ? 'Описание / организация:' : 'Группа/Ученики:'}
+                    <input type="text" id="edit-students" value="${escapeEditField(students)}">
                 </label>
                 <label>
                     Кабинет:
-                    <input type="text" id="edit-room" value="${room}">
+                    <input type="text" id="edit-room" value="${escapeEditField(room)}">
                 </label>
                 <label>
                     Время (HH:MM-HH:MM):
@@ -509,6 +509,11 @@ function openEditDialog(block, origLeft, origTop, building) {
         }
     }
     document.addEventListener('keydown', handleEscape);
+}
+
+function escapeEditField(value) {
+    return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // ФУНКЦИЯ УДАЛЕНА: moveBlockToBuilding теперь является методом BuildingService

@@ -20,17 +20,7 @@ var ConflictDetector = (function() {
     }
 
     function normalizeBlockLines(blockElement) {
-        var blockContent = blockElement.innerHTML || '';
-        return blockContent
-            .replace(/<br\s*\/?\s*>/gi, '\n')
-            .replace(/<[^>]*>/g, '')
-            .split('\n')
-            .map(function(line) {
-                return line.trim();
-            })
-            .filter(function(line) {
-                return !!line;
-            });
+        return window.readBlockContentLines(blockElement);
     }
 
     function minutesToLabel(totalMinutes) {

@@ -40,12 +40,9 @@ function updateBlockLessonType(block) {
         return;
     }
 
-    // Preserve explicit 'trial' type — classifyLessonType cannot produce it
+    // Explicit types survive subject edits, including rentals without a managed ID yet.
     var explicitType = (block.getAttribute('data-lesson-type') || '').trim();
-    if (explicitType === 'group') {
-        return explicitType;
-    }
-    if (block.getAttribute('data-block-id') && explicitType && explicitType !== 'group') {
+    if (['group', 'individual', 'nachhilfe', 'trial', 'rental'].indexOf(explicitType) !== -1) {
         return explicitType;
     }
 
@@ -64,7 +61,7 @@ function applyLessonTypeFilter(filterValue) {
         if (filterValue === 'all') {
             shouldShow = true;
         } else if (filterValue === 'non-group') {
-            shouldShow = lessonType === 'individual' || lessonType === 'nachhilfe' || lessonType === 'trial';
+            shouldShow = lessonType === 'individual' || lessonType === 'nachhilfe' || lessonType === 'trial' || lessonType === 'rental';
         } else {
             shouldShow = lessonType === filterValue;
         }

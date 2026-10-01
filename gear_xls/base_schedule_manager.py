@@ -15,6 +15,7 @@ if PROJECT_ROOT not in sys.path:
 from gear_xls.runtime_paths import get_base_schedule_path
 from gear_xls.room_name_utils import normalize_room_fields
 from gear_xls.day_constants import PUBLIC_SCHEDULE_DAY_SET
+from gear_xls.lesson_type_utils import is_legacy_rental_subject
 
 
 BASE_SCHEDULE_PATH = get_base_schedule_path()
@@ -129,6 +130,13 @@ def _validate_public_base_block(block, index):
 
     if lesson_type != "group":
         return
+    if (block.get("block_id") or block.get("source_layer") == "individual"
+            or block.get("rental_dates") is not None or block.get("rental_dates_json")
+            or is_legacy_rental_subject(block.get("subject"))):
+        raise BaseScheduleValidationError(
+            f"Managed/rental block {index} cannot be published as group",
+            code="MANAGED_BLOCK_IN_BASE",
+        )
     if day not in PUBLIC_SCHEDULE_DAY_SET:
         code = "SUNDAY_REGULAR_FORBIDDEN" if day == "So" else "INVALID_BASE_DAY"
         raise BaseScheduleValidationError(

@@ -391,6 +391,10 @@ def _normalize_individual_state(data: Any, *, restore_revision: str) -> dict[str
             block["trial_dates"] = normalized_dates
         else:
             block.pop("trial_dates", None)
+        if block.get("lesson_type") == "rental":
+            block["rental_dates"] = sorted(set(block.get("rental_dates", [])))
+        else:
+            block.pop("rental_dates", None)
 
     backup_manager.validate_individual_state(state, label="state/individual_lessons.json")
     return {

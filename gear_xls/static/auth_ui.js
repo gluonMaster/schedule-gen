@@ -58,13 +58,13 @@
     var lessonType = getBlockLessonType(block);
 
     if (role === "admin") {
-      return true;
+      return ["group", "individual", "nachhilfe", "trial", "rental"].indexOf(lessonType) !== -1;
     }
     if (role === "editor") {
-      return lessonType !== "group";
+      return ["individual", "nachhilfe", "trial", "rental"].indexOf(lessonType) !== -1;
     }
     if (role === "organizer") {
-      return lessonType === "trial";
+      return lessonType === "trial" || lessonType === "rental";
     }
     return false;
   }
@@ -83,8 +83,8 @@
   function getBlockedMutationMessage(role, lessonType, action) {
     if (role === "organizer") {
       return action === "delete"
-        ? "Организатор может удалять только trial-занятия."
-        : "Организатор может изменять только trial-занятия.";
+        ? "Организатор может удалять trial-занятия и аренду."
+        : "Организатор может изменять trial-занятия и аренду.";
     }
     if (role === "editor" && lessonType === "group") {
       return action === "delete"

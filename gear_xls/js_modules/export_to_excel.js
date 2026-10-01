@@ -21,6 +21,7 @@ function collectScheduleData(options) {
             var explicitLessonType = (block.getAttribute('data-lesson-type') || '').trim();
             if (
                 typeof window.normalizeGroupBlockRuntimeState === 'function' &&
+                !block.getAttribute('data-block-id') &&
                 (explicitLessonType === 'group' || (!explicitLessonType && !block.getAttribute('data-block-id')))
             ) {
                 window.normalizeGroupBlockRuntimeState(block);
@@ -50,12 +51,7 @@ function collectScheduleData(options) {
             
             // Извлекаем текстовое содержимое блока для получения остальных данных
             var blockContent = block.innerHTML;
-            var lines = blockContent
-                .replace(/<br>/g, '\n')  // Заменяем <br> на переносы строк
-                .replace(/<[^>]*>/g, '') // Удаляем все HTML-теги
-                .split('\n')              // Разбиваем по строкам
-                .map(line => line.trim()) // Удаляем лишние пробелы
-                .filter(line => line);    // Удаляем пустые строки
+            var lines = window.readBlockContentLines(block);
             
             // Извлекаем время начала и конца из содержимого блока
             var timeMatch = null;
@@ -158,7 +154,10 @@ function collectScheduleData(options) {
                 duration: duration,
                 color: hexColor,
                 lesson_type: lessonType,
-                trial_dates_json: trialDatesJson
+                trial_dates_json: trialDatesJson,
+                rental_dates_json: lessonType === 'rental' ? (block.getAttribute('data-rental-dates') || '[]') : '',
+                block_id: block.getAttribute('data-block-id') || '',
+                source_layer: block.getAttribute('data-source-layer') || (block.getAttribute('data-block-id') ? 'individual' : 'base')
             };
             
             // Добавляем активность в общий список
@@ -175,7 +174,17 @@ function validateScheduleDataForExcelExport(scheduleData) {
         var day = String(activity.day || '').trim();
         var lessonType = String(activity.lesson_type || 'group').trim() || 'group';
 
-        if (day === 'So' && lessonType !== 'trial') {
+        var datedRental = false;
+        if (lessonType === 'rental') {
+            try {
+                var rentalDates = JSON.parse(activity.rental_dates_json || '[]');
+                if (!Array.isArray(rentalDates)) throw new Error('Expected dates list');
+                datedRental = rentalDates.length > 0;
+            } catch (error) {
+                return { ok: false, message: 'Экспорт остановлен: некорректные даты аренды.' };
+            }
+        }
+        if (day === 'So' && lessonType !== 'trial' && !datedRental) {
             return {
                 ok: false,
                 message: 'Экспорт остановлен: воскресенье доступно только для trial-занятий.'
