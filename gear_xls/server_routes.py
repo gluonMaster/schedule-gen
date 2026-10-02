@@ -31,6 +31,7 @@ if PROJECT_ROOT not in sys.path:
 if THIS_DIR not in sys.path:
     sys.path.insert(0, THIS_DIR)
 
+from gear_xls.log_policy import QuietPollingFilter, server_log_handler
 from gear_xls.runtime_paths import (
     HEALTH_MARKER,
     ensure_runtime_dirs,
@@ -63,7 +64,7 @@ from base_schedule_manager import BaseRevisionConflict, BaseScheduleValidationEr
 
 def _build_log_handlers():
     ensure_runtime_dirs()
-    handlers = [logging.FileHandler(get_server_log_path(), encoding="utf-8")]
+    handlers = [server_log_handler(get_server_log_path())]
     if _stdout_supports_text("Запуск Flask-сервера"):
         handlers.insert(0, logging.StreamHandler(sys.stdout))
     return handlers
@@ -91,6 +92,7 @@ def configure_logging():
     for handler in _build_log_handlers():
         handler.setFormatter(formatter)
         root_logger.addHandler(handler)
+    logging.getLogger("werkzeug").addFilter(QuietPollingFilter())
     configure_logging._configured = True
 
 
