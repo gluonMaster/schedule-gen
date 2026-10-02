@@ -516,12 +516,12 @@ def schedule():
         html = injection + html
 
     auth_ui_tag = (
-        '<script src="/static/auth_ui.js?v=20261002_rental7"></script>\n'
+        '<script src="/static/auth_ui.js?v=20261002_editor1"></script>\n'
         '<script src="/static/base_sync_ui.js?v=20261001_rental4"></script>\n'
         '<script src="/static/lock_ui.js?v=20261001_rental4"></script>\n'
         '<script src="/js_modules/trial_ui.js?v=20261002_rental7"></script>\n'
         '<script src="/js_modules/conflict_detector.js?v=20261001_rental6"></script>\n'
-        '<script src="/static/individual_ui.js?v=20261002_rental7"></script>\n'
+        '<script src="/static/individual_ui.js?v=20261002_editor1"></script>\n'
         # Load the search scaffold after the existing schedule UI so it can
         # reuse the injected nav slot and exposed auth/base/individual APIs.
         '<script src="/static/schedule_search_ui.js"></script>\n'
@@ -1174,17 +1174,7 @@ def api_delete_column():
     room = (data.get("room") or "").strip()
     if not building or not day or not room:
         return jsonify({"ok": False, "error": "building, day, room required"}), 400
-    if user["role"] == "editor" and state_manager.base_has_group_lessons_in_column(
-        building, day, room
-    ):
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Column contains group lessons",
-                "code": "COLUMN_HAS_GROUP_LESSONS",
-            }
-        ), 403
-    if user["role"] == "organizer":
+    if user["role"] in ("editor", "organizer"):
         if state_manager.base_has_group_lessons_in_column(building, day, room):
             return jsonify(
                 {
@@ -1193,14 +1183,13 @@ def api_delete_column():
                     "code": "COLUMN_HAS_GROUP_LESSONS",
                 }
             ), 403
-        if state_manager.individual_column_has_non_rental_blocks(building, day, room):
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "Column contains non-rental lessons",
-                    "code": "COLUMN_HAS_NON_RENTAL_BLOCKS",
-                }
-            ), 403
+        # Column deletion removes every managed block in it, so no foreign types may be there.
+        if state_manager.individual_column_has_blocks_outside_role(building, day, room, user["role"]):
+            if user["role"] == "organizer":
+                error, code = "Column contains non-rental lessons", "COLUMN_HAS_NON_RENTAL_BLOCKS"
+            else:
+                error, code = "Column contains rental blocks", "COLUMN_HAS_RENTAL_BLOCKS"
+            return jsonify({"ok": False, "error": error, "code": code}), 403
     guard, guard_response = _write_guard(user, data)
     if guard_response:
         return guard_response

@@ -113,15 +113,40 @@ def test_managed_api_denies_group_and_unknown_type(isolated_editor, role):
     assert state_manager._validate_block(rental(), "unknown") == "Forbidden lesson_type"
 
 
-@pytest.mark.parametrize("role", ["admin", "editor"])
-def test_admin_editor_can_work_with_rental(isolated_editor, role):
+def test_admin_can_work_with_rental(isolated_editor):
     routes, ind_path, _ = isolated_editor
     with routes.app.test_client() as client:
-        login(client, role)
+        login(client, "admin")
         response = client.post("/api/blocks", json=guard(ind_path, **rental(subject="")))
         assert response.status_code == 200
         assert response.json["block"]["subject"] == "Vermietung"
         assert client.delete("/api/blocks/" + response.json["block"]["id"], json=guard(ind_path)).status_code == 200
+
+
+def test_editor_cannot_create_change_or_delete_rental(isolated_editor):
+    routes, ind_path, _ = isolated_editor
+    lesson = rental(lesson_type="individual", subject="Ind. Mathe", room="1.02")
+    lesson.pop("rental_dates")
+    with routes.app.test_client() as client:
+        login(client, "admin")
+        rental_id = client.post("/api/blocks", json=guard(ind_path, **rental())).json["block"]["id"]
+        lesson_id = client.post("/api/blocks", json=guard(ind_path, **lesson)).json["block"]["id"]
+        login(client, "editor")
+        before = ind_path.read_bytes()
+        assert client.post("/api/blocks", json=guard(ind_path, **rental(room="1.03"))).json[
+            "error"] == "Forbidden lesson_type"
+        assert client.put(f"/api/blocks/{rental_id}", json=guard(ind_path, start_time="10:15")).status_code == 400
+        assert client.delete(f"/api/blocks/{rental_id}", json=guard(ind_path)).status_code == 403
+        assert client.put(f"/api/blocks/{lesson_id}", json=guard(
+            ind_path, lesson_type="rental", subject="Vermietung", rental_dates=[])).status_code == 400
+        assert client.delete("/api/columns", json=guard(ind_path, building="Villa", day="Mo", room="1.01")).json[
+            "code"] == "COLUMN_HAS_RENTAL_BLOCKS"
+        assert ind_path.read_bytes() == before
+        # The editor keeps her own lesson types and columns without rentals.
+        assert client.put(f"/api/blocks/{lesson_id}", json=guard(ind_path, start_time="10:15")).status_code == 200
+        assert client.delete("/api/columns", json=guard(
+            ind_path, building="Villa", day="Mo", room="1.02")).json["blocks_removed"] == 1
+    assert [b["id"] for b in json.loads(ind_path.read_text(encoding="utf-8"))["blocks"]] == [rental_id]
 
 
 def test_organizer_cannot_take_over_teaching_block(isolated_editor):
@@ -294,7 +319,8 @@ def test_generator_and_route_deliver_updated_editor_code(isolated_editor, tmp_pa
             ("/static/lock_ui.js", "static/lock_ui.js"),
         ]:
             version = {"conflict_detector": "20261001_rental6", "base_sync_ui": "20261001_rental4",
-                       "lock_ui": "20261001_rental4"}.get(url.rsplit("/", 1)[1][:-3], "20261002_rental7")
+                       "lock_ui": "20261001_rental4", "auth_ui": "20261002_editor1",
+                       "individual_ui": "20261002_editor1"}.get(url.rsplit("/", 1)[1][:-3], "20261002_rental7")
             assert f'{url}?v={version}' in html
             response = client.get(url + "?v=" + version)
             assert response.status_code == 200

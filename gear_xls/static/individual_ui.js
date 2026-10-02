@@ -117,7 +117,7 @@
       return ["group", "individual", "nachhilfe", "trial", "rental"].indexOf(lessonType) !== -1;
     }
     if (role === "editor") {
-      return ["individual", "nachhilfe", "trial", "rental"].indexOf(lessonType) !== -1;
+      return ["individual", "nachhilfe", "trial"].indexOf(lessonType) !== -1;
     }
     if (role === "organizer") {
       return lessonType === "rental";
@@ -142,6 +142,11 @@
       return action === "delete"
         ? "Недостаточно прав для удаления групповых занятий."
         : "Недостаточно прав для изменения этого типа занятия.";
+    }
+    if (role === "editor" && lessonType === "rental") {
+      return action === "delete"
+        ? "Недостаточно прав для удаления аренды (Vermietung)."
+        : "Аренда (Vermietung) доступна только для просмотра.";
     }
     return "Недостаточно прав для этого действия.";
   }
@@ -512,7 +517,8 @@
 
     // Also enhance an older generated dialog that already contains trial controls.
     typeSelect.disabled = false;
-    if (!typeSelect.querySelector('option[value="rental"]')) {
+    // Rentals belong to the admin and the organizer, not to the editor.
+    if (role !== "editor" && !typeSelect.querySelector('option[value="rental"]')) {
       var rentalOption = document.createElement("option");
       rentalOption.value = "rental";
       rentalOption.textContent = "Аренда (Vermietung)";
@@ -1570,6 +1576,12 @@
       return;
     }
 
+    if (payload.lesson_type === "rental" && role === "editor") {
+      stopDomMutation(event);
+      alert("Недостаточно прав для создания аренды (Vermietung).");
+      return;
+    }
+
     if (payload.day === "So" && payload.lesson_type !== "trial" && !(payload.lesson_type === "rental" && payload.rental_dates.length)) {
       stopDomMutation(event);
       alert("Воскресенье доступно только для trial-занятий.");
@@ -1923,6 +1935,15 @@
       return;
     }
 
+    if (currentRole() === "editor" && columnHasRentalBlocks(container, building, day, colIndex)) {
+      alert(
+        "Нельзя удалить кабинет " +
+          room +
+          ": он содержит аренду (Vermietung). Обратитесь к Алле."
+      );
+      return;
+    }
+
     if (currentRole() === "organizer" && columnHasNonRentalBlocks(container, building, day, colIndex)) {
       alert(
         "Нельзя удалить кабинет " +
@@ -2191,8 +2212,12 @@
       alert("Нельзя удалить кабинет: в опубликованном расписании есть групповые занятия.");
       return;
     }
-    if (result.status === 403 && code === "COLUMN_HAS_NON_TRIAL_BLOCKS") {
-      alert("Нельзя удалить кабинет: в колонке есть занятия, кроме trial.");
+    if (result.status === 403 && code === "COLUMN_HAS_NON_RENTAL_BLOCKS") {
+      alert("Нельзя удалить кабинет: в колонке есть занятия, кроме аренды.");
+      return;
+    }
+    if (result.status === 403 && code === "COLUMN_HAS_RENTAL_BLOCKS") {
+      alert("Нельзя удалить кабинет: в колонке есть аренда (Vermietung).");
       return;
     }
     if (result.status === 404 && code === "NOT_FOUND") {
@@ -2296,7 +2321,7 @@
     return stripHtml(((block.innerHTML || "").split(/<br\s*\/?>/i)[0] || ""));
   }
 
-  function columnHasGroupBlocks(container, building, day, colIndex) {
+  function columnHasBlocks(container, building, day, colIndex, matchesType) {
     return Array.from(
       container.querySelectorAll(
         '.activity-block[data-building="' +
@@ -2308,25 +2333,26 @@
     ).some(function (block) {
       return (
         toInteger(block.getAttribute("data-col-index"), -1) === colIndex &&
-        getBlockLessonType(block) === "group"
+        matchesType(getBlockLessonType(block))
       );
     });
   }
 
+  function columnHasGroupBlocks(container, building, day, colIndex) {
+    return columnHasBlocks(container, building, day, colIndex, function (type) {
+      return type === "group";
+    });
+  }
+
+  function columnHasRentalBlocks(container, building, day, colIndex) {
+    return columnHasBlocks(container, building, day, colIndex, function (type) {
+      return type === "rental";
+    });
+  }
+
   function columnHasNonRentalBlocks(container, building, day, colIndex) {
-    return Array.from(
-      container.querySelectorAll(
-        '.activity-block[data-building="' +
-          cssEscape(building) +
-          '"][data-day="' +
-          cssEscape(day) +
-          '"]'
-      )
-    ).some(function (block) {
-      return (
-        toInteger(block.getAttribute("data-col-index"), -1) === colIndex &&
-        getBlockLessonType(block) !== "rental"
-      );
+    return columnHasBlocks(container, building, day, colIndex, function (type) {
+      return type !== "rental";
     });
   }
 

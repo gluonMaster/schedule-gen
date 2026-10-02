@@ -161,6 +161,16 @@ assert.equal(type.disabled, false);
 assert.deepEqual(type.querySelectorAll('option').map(option => option.value), ['rental']);
 assert.equal(type.value, 'rental');
 assert.equal(context.SchedGenAuthUI.canMutateBlock('organizer', { getAttribute: () => 'trial' }), false);
+// The editor keeps auto/trial without a rental choice; rentals are read-only for her.
+context.USER_ROLE = 'editor';
+const editorForm = form('create-form', { 'new-subject': '', 'new-time': '10:00-11:00' });
+api.enhanceCreateDialog(editorForm);
+assert.deepEqual(editorForm.querySelector('#new-lesson-type').querySelectorAll('option').map(option => option.value), ['', 'trial']);
+for (const [kind, allowed] of [['individual', true], ['nachhilfe', true], ['trial', true], ['rental', false], ['group', false]]) {
+    assert.equal(context.SchedGenAuthUI.canMutateBlock('editor', { getAttribute: () => kind }), allowed, kind);
+}
+editorForm.remove();
+context.USER_ROLE = 'organizer';
 type.value = 'rental'; type.events.change.forEach(fn => fn());
 assert.equal(createForm.querySelector('#new-subject').value, 'Vermietung');
 assert.equal(createForm.querySelector('#create-trial-dates-section').style.display, 'none');

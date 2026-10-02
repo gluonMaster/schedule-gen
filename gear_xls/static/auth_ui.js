@@ -61,7 +61,7 @@
       return ["group", "individual", "nachhilfe", "trial", "rental"].indexOf(lessonType) !== -1;
     }
     if (role === "editor") {
-      return ["individual", "nachhilfe", "trial", "rental"].indexOf(lessonType) !== -1;
+      return ["individual", "nachhilfe", "trial"].indexOf(lessonType) !== -1;
     }
     if (role === "organizer") {
       return lessonType === "rental";
@@ -90,6 +90,11 @@
       return action === "delete"
         ? "Недостаточно прав для удаления групповых занятий."
         : "Групповые занятия доступны только для просмотра.";
+    }
+    if (role === "editor" && lessonType === "rental") {
+      return action === "delete"
+        ? "Недостаточно прав для удаления аренды (Vermietung)."
+        : "Аренда (Vermietung) доступна только для просмотра.";
     }
     return "Недостаточно прав для этого действия.";
   }
