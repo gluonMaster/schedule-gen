@@ -19,6 +19,9 @@ SUBJECT_GROUP_ALIASES = {
 _SEPARATOR_RE = re.compile(r"[\s\._\-/+(),]+")
 _RUSSIAN_GROUP_CODE_RE = re.compile(r"^\d{1,2}(?:-\d{1,2})?[A-Z]{1,3}$", re.IGNORECASE)
 _RUSSIAN_MARKER_RE = re.compile(r"(^|[\s\._\-/+(),])(?:ru|russisch)(?=$|[\s\._\-/+(),])", re.IGNORECASE)
+# Класс (параллель 1-12) + буква A-E: "3A", "Kunst Di 3A", "4D1"; "3-4JC" и "1Kl" не классы.
+_CLASS_TOKEN_RE = re.compile(r"(?<![0-9A-Za-z])(1[0-2]|[1-9])[A-E](?![A-Za-z])")
+CLASS_MIN_AGES = {grade: grade + 4 for grade in range(1, 13)}
 _RUSSIAN_SUBJECT_PREFIXES = ("ru", "russ")
 _RUSSIAN_TODDLER_SUBJECT_MARKERS = ("jahrige", "jährige", "jaehrige")
 _NON_RUSSIAN_GROUP_PREFIXES = (
@@ -80,6 +83,17 @@ def _is_russian_subject_text(subject_text):
         subject_text.startswith(_RUSSIAN_SUBJECT_PREFIXES)
         or any(marker in subject_text for marker in _RUSSIAN_TODDLER_SUBJECT_MARKERS)
     )
+
+
+def class_age_label(group):
+    """
+    Return 'ab NJ' when the group names classes of one grade ('3A', '1C+1D').
+    Combined classes of different grades ('6D+8B') get no age.
+    """
+    grades = {int(grade) for grade in _CLASS_TOKEN_RE.findall(label_text_or_empty(group))}
+    if len(grades) != 1:
+        return ""
+    return f"ab {CLASS_MIN_AGES[grades.pop()]}J"
 
 
 def get_lesson_type(lesson):

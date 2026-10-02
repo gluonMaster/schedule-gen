@@ -6,7 +6,9 @@ import sys
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT_DIR, "visualiser"))
 
+from enhanced_export_manager_html import HtmlExportMixin  # noqa: E402
 from lesson_label_utils import (  # noqa: E402
+    class_age_label,
     format_pdf_group_label,
     group_name_contains_subject,
     normalize_label_text,
@@ -100,6 +102,70 @@ def test_pdf_group_label_does_not_prefix_non_russian_or_marked_groups():
     for subject, group in cases:
         assert should_prefix_russisch_to_group(subject, group) is False
         assert format_pdf_group_label(_lesson(subject, group)) == group
+
+
+def test_class_age_label_for_single_grade_groups():
+    cases = [
+        ("1B", "ab 5J"),
+        ("10B", "ab 14J"),
+        ("11C", "ab 15J"),
+        ("Kunst Sa 12E", "ab 16J"),
+        ("Kunst Di 3A", "ab 7J"),
+        ("Mathe 8C", "ab 12J"),
+        ("4D1", "ab 8J"),
+        ("Kunst Sa 1C+1D", "ab 5J"),
+    ]
+
+    for group, expected in cases:
+        assert class_age_label(group) == expected, group
+
+
+def test_class_age_label_skips_mixed_grades_and_age_groups():
+    groups = [
+        "Kunst Fr 6D+8B",
+        "Kunst Sa 4B+10D",
+        "Musik Sa 2B+3C",
+        "3-4JC",
+        "3-4JC Log",
+        "4-5JA",
+        "Do 6-7JA",
+        "Tanz Mi ab 7J",
+        "Deutsch 1Kl Fr",
+        "Schach Mi A",
+        "Gitarre A Mo",
+        "Kunst Mi StudioO",
+        "13A",
+        "",
+        None,
+        math.nan,
+    ]
+
+    for group in groups:
+        assert class_age_label(group) == "", group
+
+
+def _html_block(group):
+    lesson = {
+        "subject": "Kunst",
+        "group": group,
+        "lesson_type": "group",
+        "start_time": "16:00",
+        "end_time": "16:45",
+        "teacher": "Teacher",
+        "room": "1.05",
+        "building": "Villa",
+    }
+    return HtmlExportMixin()._generate_lesson_block_html(lesson, "Di")
+
+
+def test_html_block_shows_age_next_to_group_and_keeps_group_attribute():
+    block = _html_block("Kunst Di 3A")
+    assert '<div class="lesson-group">Kunst Di 3A <span class="lesson-age">· ab 7J</span></div>' in block
+    assert 'data-group="Kunst Di 3A"' in block
+
+    mixed = _html_block("Kunst Fr 6D+8B")
+    assert '<div class="lesson-group">Kunst Fr 6D+8B</div>' in mixed
+    assert "lesson-age" not in mixed
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import urlsplit
 from datetime import datetime
-from lesson_label_utils import get_lesson_type, label_text_or_empty, should_show_subject_line
+from lesson_label_utils import class_age_label, get_lesson_type, label_text_or_empty, should_show_subject_line
 
 ORGANIZATION_NAME = 'Kinder- und Elternzentrum "KOLIBRI" e.V.'
 WEEKDAYS = {day: index for index, day in enumerate(('Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'), 1)}
@@ -233,6 +233,8 @@ class HtmlExportMixin:
                 font-weight: bold;
                 margin-bottom: 5px;
             }
+
+            .lesson-age { font-size: 0.85em; font-weight: normal; white-space: nowrap; }
 
             .lesson-teacher {
                 margin-bottom: 5px;
@@ -642,6 +644,8 @@ class HtmlExportMixin:
         )
         if model:
             data_attributes += f' data-lesson-id="{model["id"]}"'
+        # Возраст только отображается: group входит в data-lesson-id и ссылки пробных уроков
+        age_label = class_age_label(group_name)
         # Здание рядом с номером комнаты остаётся коротким маркером Kolibri/Villa,
         # полное название учреждения стоит один раз в шапке документа.
         group_name, teacher_name, room_name, start_time, end_time, building_name = map(
@@ -659,7 +663,8 @@ class HtmlExportMixin:
         if should_show_subject_line(lesson):
             subject_html = html_lib.escape(subject_val, quote=True)
             block_html.append(f'                <div class="lesson-subject">{subject_html}</div>')
-        block_html.append(f'                <div class="lesson-group">{group_name}</div>')
+        age_html = f' <span class="lesson-age">· {age_label}</span>' if age_label else ''
+        block_html.append(f'                <div class="lesson-group">{group_name}{age_html}</div>')
         block_html.append(f'                <div class="lesson-teacher">{teacher_name}</div>')
         block_html.append(f'                <div class="lesson-location">{room_name}, {building_name}</div>')
         if model and cta_enabled:
