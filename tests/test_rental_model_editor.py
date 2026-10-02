@@ -135,6 +135,25 @@ def test_organizer_cannot_take_over_teaching_block(isolated_editor):
         assert client.delete(f"/api/blocks/{block_id}", json=guard(ind_path)).status_code == 403
 
 
+def test_organizer_works_with_rental_only(isolated_editor):
+    routes, ind_path, _ = isolated_editor
+    trial = rental(lesson_type="trial", subject="Probe", trial_dates=["2026-10-05"])
+    trial.pop("rental_dates")
+    with routes.app.test_client() as client:
+        login(client, "admin")
+        trial_id = client.post("/api/blocks", json=guard(ind_path, **trial)).json["block"]["id"]
+        login(client, "organizer")
+        before = ind_path.read_bytes()
+        assert client.post("/api/blocks", json=guard(ind_path, **{**trial, "room": "1.02"})).status_code != 200
+        assert client.put(f"/api/blocks/{trial_id}", json=guard(ind_path, room="1.02")).status_code != 200
+        assert client.delete(f"/api/blocks/{trial_id}", json=guard(ind_path)).status_code == 403
+        assert client.post(f"/api/blocks/{trial_id}/convert", json=guard(ind_path)).status_code != 200
+        assert client.delete("/api/columns", json=guard(ind_path, building="Villa", day="Mo", room="1.01")).json[
+            "code"] == "COLUMN_HAS_NON_RENTAL_BLOCKS"
+        assert ind_path.read_bytes() == before
+        assert client.post("/api/blocks", json=guard(ind_path, **rental(room="1.02"))).status_code == 200
+
+
 @pytest.mark.parametrize("extra", [
     {"block_id": "managed-id"}, {"source_layer": "individual"},
     {"subject": " VERMietung "}, {"rental_dates_json": "[]"},
@@ -193,9 +212,9 @@ def test_rental_and_exact_legacy_trial_are_retained_on_read(isolated_editor):
     assert state_manager.get_individual_lessons()["blocks"] == retained
     assert ind_path.read_bytes() == before
     ordinary = rental(lesson_type="trial", subject="Trial", trial_dates=["2026-10-05"])
-    assert state_manager._validate_block(ordinary, "organizer") is None
+    assert state_manager._validate_block(ordinary, "editor") is None
     assert "rental_dates" not in ordinary
-    assert state_manager._validate_block(rental(lesson_type="trial", trial_dates=[]), "organizer")
+    assert state_manager._validate_block(rental(lesson_type="trial", trial_dates=[]), "editor")
 
 
 def test_backup_restore_rental_dates_id_and_group_rejection():
@@ -274,8 +293,8 @@ def test_generator_and_route_deliver_updated_editor_code(isolated_editor, tmp_pa
             ("/js_modules/conflict_detector.js", "js_modules/conflict_detector.js"),
             ("/static/lock_ui.js", "static/lock_ui.js"),
         ]:
-            version = ("20261001_rental6" if "conflict_detector" in url else
-                       "20261001_rental1" if "auth_ui" in url else "20261001_rental4")
+            version = {"conflict_detector": "20261001_rental6", "base_sync_ui": "20261001_rental4",
+                       "lock_ui": "20261001_rental4"}.get(url.rsplit("/", 1)[1][:-3], "20261002_rental7")
             assert f'{url}?v={version}' in html
             response = client.get(url + "?v=" + version)
             assert response.status_code == 200

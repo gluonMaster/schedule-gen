@@ -60,7 +60,7 @@ function canResizeBlock(block) {
     }
     if (role === 'admin') return true;
     if (role === 'editor') return lessonType !== 'group';
-    if (role === 'organizer') return lessonType === 'trial';
+    if (role === 'organizer') return lessonType === 'rental';
     return false;
 }
 

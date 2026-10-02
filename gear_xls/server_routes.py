@@ -514,12 +514,12 @@ def schedule():
         html = injection + html
 
     auth_ui_tag = (
-        '<script src="/static/auth_ui.js?v=20261001_rental1"></script>\n'
+        '<script src="/static/auth_ui.js?v=20261002_rental7"></script>\n'
         '<script src="/static/base_sync_ui.js?v=20261001_rental4"></script>\n'
         '<script src="/static/lock_ui.js?v=20261001_rental4"></script>\n'
-        '<script src="/js_modules/trial_ui.js?v=20261001_rental4"></script>\n'
+        '<script src="/js_modules/trial_ui.js?v=20261002_rental7"></script>\n'
         '<script src="/js_modules/conflict_detector.js?v=20261001_rental6"></script>\n'
-        '<script src="/static/individual_ui.js?v=20261001_rental4"></script>\n'
+        '<script src="/static/individual_ui.js?v=20261002_rental7"></script>\n'
         # Load the search scaffold after the existing schedule UI so it can
         # reuse the injected nav slot and exposed auth/base/individual APIs.
         '<script src="/static/schedule_search_ui.js"></script>\n'
@@ -1191,12 +1191,12 @@ def api_delete_column():
                     "code": "COLUMN_HAS_GROUP_LESSONS",
                 }
             ), 403
-        if state_manager.individual_column_has_non_trial_blocks(building, day, room):
+        if state_manager.individual_column_has_non_rental_blocks(building, day, room):
             return jsonify(
                 {
                     "ok": False,
-                    "error": "Column contains non-trial lessons",
-                    "code": "COLUMN_HAS_NON_TRIAL_BLOCKS",
+                    "error": "Column contains non-rental lessons",
+                    "code": "COLUMN_HAS_NON_RENTAL_BLOCKS",
                 }
             ), 403
     guard, guard_response = _write_guard(user, data)

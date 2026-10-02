@@ -120,7 +120,7 @@
       return ["individual", "nachhilfe", "trial", "rental"].indexOf(lessonType) !== -1;
     }
     if (role === "organizer") {
-      return lessonType === "trial" || lessonType === "rental";
+      return lessonType === "rental";
     }
     return false;
   }
@@ -135,8 +135,8 @@
 
     if (role === "organizer") {
       return action === "delete"
-        ? "Организатор может удалять trial-занятия и аренду."
-        : "Организатор может редактировать trial-занятия и аренду.";
+        ? "Организатор может удалять только аренду (Vermietung)."
+        : "Организатор может редактировать только аренду (Vermietung).";
     }
     if (role === "editor" && lessonType === "group") {
       return action === "delete"
@@ -483,13 +483,8 @@
       typeSelect.id = "new-lesson-type";
       typeSelect.style.marginTop = "5px";
 
-      if (role === "organizer") {
-        trialOption = document.createElement("option");
-        trialOption.value = "trial";
-        trialOption.textContent = "Пробное / разовое (trial)";
-        typeSelect.appendChild(trialOption);
-        typeSelect.value = "trial";
-      } else {
+      // The organizer gets only the rental option added below.
+      if (role !== "organizer") {
         autoOption = document.createElement("option");
         autoOption.value = "";
         autoOption.textContent = "Авто (по предмету)";
@@ -523,6 +518,13 @@
       rentalOption.textContent = "Аренда (Vermietung)";
       typeSelect.appendChild(rentalOption);
     }
+    if (role === "organizer") {
+      // Organizer works with rentals only, also in an older dialog that already offers trial.
+      Array.prototype.slice.call(typeSelect.querySelectorAll("option")).forEach(function (option) {
+        if (option.value !== "rental") option.remove();
+      });
+      typeSelect.value = "rental";
+    }
     if (!form.querySelector("#create-rental-dates-section")) {
       var rentalSection = window.TrialUI.buildRentalDatesSection([]);
       rentalSection.id = "create-rental-dates-section";
@@ -543,7 +545,7 @@
         });
       }
 
-      syncCreateDialogTrialUi(form, role === "organizer");
+      syncCreateDialogTrialUi(form);
       enhancementSucceeded = true;
     } finally {
       form.__trialCreateEnhancing = false;
@@ -553,7 +555,7 @@
     }
   }
 
-  function syncCreateDialogTrialUi(form, forceTrialColor) {
+  function syncCreateDialogTrialUi(form) {
     var typeSelect = form ? form.querySelector("#new-lesson-type") : null;
     var typeHint = form ? form.querySelector("#create-lesson-type-hint") : null;
     var datesSection = form ? form.querySelector("#create-trial-dates-section") : null;
@@ -586,16 +588,16 @@
     }
 
     if (isTrial) {
-      maybeApplyCreateTrialColor(form, !!forceTrialColor);
+      maybeApplyCreateTrialColor(form);
     }
   }
 
-  function maybeApplyCreateTrialColor(form, force) {
+  function maybeApplyCreateTrialColor(form) {
     var currentColor = (getFieldValue(form, "#color-value") || "").trim().toUpperCase();
     var regularDefault = defaultColor("group").toUpperCase();
     var trialDefault = defaultColor("trial").toUpperCase();
 
-    if (!force && currentColor && currentColor !== regularDefault) {
+    if (currentColor && currentColor !== regularDefault) {
       return;
     }
 
@@ -1239,9 +1241,9 @@
     if (
       block &&
       currentRole() === "organizer" &&
-      ["trial", "rental"].indexOf(getBlockLessonType(block)) === -1
+      getBlockLessonType(block) !== "rental"
     ) {
-      alert("Организатор может редактировать trial-занятия и аренду.");
+      alert("Организатор может редактировать только аренду (Vermietung).");
       return;
     }
     if (!block || typeof window.openEditDialog !== "function") {
@@ -1562,9 +1564,9 @@
       return;
     }
 
-    if (["trial", "rental"].indexOf(payload.lesson_type) === -1 && role === "organizer") {
+    if (payload.lesson_type !== "rental" && role === "organizer") {
       stopDomMutation(event);
-      alert("Организатор может создавать trial-занятия и аренду.");
+      alert("Организатор может создавать только аренду (Vermietung).");
       return;
     }
 
@@ -1639,9 +1641,9 @@
       return;
     }
 
-    if (["trial", "rental"].indexOf(currentLessonType) === -1 && currentRole() === "organizer") {
+    if (currentLessonType !== "rental" && currentRole() === "organizer") {
       stopDomMutation(event);
-      alert("Организатор может редактировать trial-занятия и аренду.");
+      alert("Организатор может редактировать только аренду (Vermietung).");
       return;
     }
 
@@ -1727,9 +1729,9 @@
       return;
     }
 
-    if (["trial", "rental"].indexOf(lessonType) === -1 && currentRole() === "organizer") {
+    if (lessonType !== "rental" && currentRole() === "organizer") {
       stopDomMutation(event);
-      alert("Организатор может удалять trial-занятия и аренду.");
+      alert("Организатор может удалять только аренду (Vermietung).");
       return;
     }
 
@@ -1921,7 +1923,7 @@
       return;
     }
 
-    if (currentRole() === "organizer" && columnHasNonTrialBlocks(container, building, day, colIndex)) {
+    if (currentRole() === "organizer" && columnHasNonRentalBlocks(container, building, day, colIndex)) {
       alert(
         "Нельзя удалить кабинет " +
           room +
@@ -2023,8 +2025,8 @@
     var typeSelectEl = form ? form.querySelector("#new-lesson-type") : null;
     var explicitType = typeSelectEl ? typeSelectEl.value : "";
 
-    if (explicitType === "rental") return "rental";
-    if (currentRole() === "organizer" || explicitType === "trial") {
+    if (explicitType === "rental" || currentRole() === "organizer") return "rental";
+    if (explicitType === "trial") {
       return "trial";
     }
     return inferLessonType(getFieldValue(form, "#new-subject"));
@@ -2311,7 +2313,7 @@
     });
   }
 
-  function columnHasNonTrialBlocks(container, building, day, colIndex) {
+  function columnHasNonRentalBlocks(container, building, day, colIndex) {
     return Array.from(
       container.querySelectorAll(
         '.activity-block[data-building="' +
@@ -2323,7 +2325,7 @@
     ).some(function (block) {
       return (
         toInteger(block.getAttribute("data-col-index"), -1) === colIndex &&
-        ["trial", "rental"].indexOf(getBlockLessonType(block)) === -1
+        getBlockLessonType(block) !== "rental"
       );
     });
   }

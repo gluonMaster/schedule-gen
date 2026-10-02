@@ -320,7 +320,7 @@ def _bootstrap_individual_from_html_if_needed(state):
 _ROLE_ALLOWED_TYPES = {
     "admin":     {"individual", "nachhilfe", "trial", "rental"},
     "editor":    {"individual", "nachhilfe", "trial", "rental"},
-    "organizer": {"trial", "rental"},
+    "organizer": {"rental"},
 }
 
 
@@ -622,7 +622,7 @@ def convert_block_to_regular(block_id, role, guard=None):
                     continue
                 if block.get("lesson_type") != "trial":
                     return _finish_mutation(None, "NOT_TRIAL", state, cleanup, cleanup["removed"] > 0)
-                if role not in ("admin", "editor", "organizer"):
+                if role not in ("admin", "editor"):
                     return _finish_mutation(None, "FORBIDDEN", state, cleanup, cleanup["removed"] > 0)
                 if block.get("day") in TRIAL_ONLY_DAYS:
                     return _finish_mutation(
@@ -641,7 +641,7 @@ def convert_block_to_regular(block_id, role, guard=None):
             return _finish_mutation(None, error, state, cleanup, cleanup["removed"] > 0)
 
 
-def individual_column_has_non_trial_blocks(building, day, room):
+def individual_column_has_non_rental_blocks(building, day, room):
     with _ind_mutex:
         with _locked_individual_file():
             state = _read_individual()
@@ -649,7 +649,7 @@ def individual_column_has_non_trial_blocks(building, day, room):
         block.get("building") == building
         and block.get("day") == day
         and block.get("room") == room
-        and block.get("lesson_type") not in ("trial", "rental")
+        and block.get("lesson_type") not in _ROLE_ALLOWED_TYPES["organizer"]
         for block in state.get("blocks", [])
         if isinstance(block, dict)
     )

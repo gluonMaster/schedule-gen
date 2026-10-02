@@ -2,7 +2,7 @@
   "use strict";
 
   var _stylesInjected = false;
-  var _allowedConvertRoles = ["admin", "editor", "organizer"];
+  var _allowedConvertRoles = ["admin", "editor"];
 
   function injectTrialStyles() {
     var existing = document.getElementById("schedgen-trial-styles");

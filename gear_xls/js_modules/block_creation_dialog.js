@@ -179,14 +179,21 @@ function openCreateBlockDialog(e, preselectedDay, preselectedCol, preselectedRow
                 justify-content: center;
                 align-items: center;
                 z-index: 9999;
+                /* Окно не заходит под закреплённую панель навигации */
+                padding-top: var(--schedgen-nav-height, 0px);
+                box-sizing: border-box;
             }
             .edit-dialog {
                 background-color: white;
-                padding: 20px;
+                padding: 20px 20px 0;
                 border-radius: 8px;
                 box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
                 width: 400px;
                 max-width: 90%;
+                /* Длинная форма (аренда по датам) прокручивается внутри окна */
+                max-height: calc(100vh - var(--schedgen-nav-height, 0px) - 40px);
+                overflow-y: auto;
+                box-sizing: border-box;
             }
             .edit-dialog h3 {
                 margin-top: 0;
@@ -227,8 +234,13 @@ function openCreateBlockDialog(e, preselectedDay, preselectedCol, preselectedRow
             .edit-dialog .button-row {
                 display: flex;
                 justify-content: flex-end;
-                margin-top: 15px;
+                margin-top: 5px;
+                padding: 10px 0 20px;
                 gap: 10px;
+                /* Кнопки остаются видимыми при прокрутке длинной формы */
+                position: sticky;
+                bottom: 0;
+                background-color: white;
             }
             .edit-dialog button {
                 padding: 8px 15px;

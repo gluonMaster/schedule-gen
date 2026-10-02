@@ -157,7 +157,10 @@ const api = context.individualTest;
 api.enhanceCreateDialog(createForm);
 const type = createForm.querySelector('#new-lesson-type');
 assert.equal(type.disabled, false);
-assert(type.querySelector('option[value="rental"]'));
+// The organizer works with rentals only: no trial/auto choice in the create dialog.
+assert.deepEqual(type.querySelectorAll('option').map(option => option.value), ['rental']);
+assert.equal(type.value, 'rental');
+assert.equal(context.SchedGenAuthUI.canMutateBlock('organizer', { getAttribute: () => 'trial' }), false);
 type.value = 'rental'; type.events.change.forEach(fn => fn());
 assert.equal(createForm.querySelector('#new-subject').value, 'Vermietung');
 assert.equal(createForm.querySelector('#create-trial-dates-section').style.display, 'none');
