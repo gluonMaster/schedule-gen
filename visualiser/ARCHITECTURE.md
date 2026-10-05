@@ -67,7 +67,7 @@ Via project-root `config.json`:
 ```
 When `auto_copy_enabled` is true, copies output files to OneDrive automatically.
 The `academic_year` section is displayed by the root GUI to distinguish parallel instances.
-See `CONFIG_README.md` for full documentation.
+See the root `README.md` and `config.example.json` for configuration.
 
 ## Output Files
 All outputs written to `visualiser/`:

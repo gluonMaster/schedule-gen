@@ -1,0 +1,6 @@
+# Optional export routes; see README for required external programs.
+-r requirements.txt
+pdfkit
+pdf2image
+icalendar
+pytz

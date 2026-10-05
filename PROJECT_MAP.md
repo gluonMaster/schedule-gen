@@ -171,8 +171,8 @@ GUI (`gui.py`) пытается "склеить" это кнопками, но �
 
 ## 6) Конфиги и "технические" файлы
 
-- `config.json` — настройки автокопирования артефактов визуализации (см. `CONFIG_README.md`)
-- `CONFIG_README.md` — описание `config.json`
-- `DEPLOYMENT_GUIDE.md` — как переносить `ScheduleGenerator.exe` и нужные папки
+- `config.json` — локальные настройки автокопирования артефактов визуализации (см. `README.md`)
+- `config.example.json` — безопасный пример настроек без производственных путей
+- `README.md` — установка, примеры и ограничения публичной версии
 - `gear_xls/config/users.json` — учётные записи пользователей web-редактора (bcrypt-хэши паролей)
 - `gear_xls/scripts/set_password.py` — CLI-утилита для обновления паролей в `users.json`

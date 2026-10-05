@@ -315,7 +315,7 @@ def cmd_handoff():
 
     # Context reminder
     lines.append("\n## Project Context (paste into new session)")
-    lines.append("- Architecture: `PROJECT_MAP.md`, `Structure-Claude.md`")
+    lines.append("- Architecture: `PROJECT_MAP.md`; setup and scope: `README.md`")
     lines.append("- Agents: `.claude/agents/` (spec-agent, prompt-generator, code-verifier, doc-updater, bug-analyzer)")
     lines.append("- Skills: `/orchestrate`, `/verify`, `/fix-cycle`, `/update-docs`")
     lines.append("- Pipeline tracker: `python orchestrator.py status`")
@@ -329,7 +329,7 @@ def cmd_handoff():
     print("\nTo resume in a new session:")
     print(f"  1. Open a new Claude Code session")
     print(f"  2. Paste the contents of {HANDOFF_FILE} as your first message")
-    print(f"  3. Claude Code will have full context from CLAUDE.md + your handoff")
+    print(f"  3. Review README.md and the generated handoff for project context")
 
 
 def cmd_reset():

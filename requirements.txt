@@ -1,0 +1,11 @@
+# Direct runtime imports. This is not a fully resolved dependency lock file.
+bcrypt
+Flask
+Flask-Cors
+matplotlib
+numpy
+openpyxl
+ortools
+pandas
+reportlab
+pywin32; sys_platform == "win32"

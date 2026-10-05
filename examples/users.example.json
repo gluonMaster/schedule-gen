@@ -1,0 +1,10 @@
+{
+  "users": [
+    {
+      "login": "demo_admin",
+      "display_name": "Demo administrator",
+      "role": "admin",
+      "password_hash": ""
+    }
+  ]
+}

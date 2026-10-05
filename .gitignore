@@ -2,6 +2,8 @@
 gear_xls/config/
 *.txt
 *.json
+!config.example.json
+!examples/*.example.json
 !requirements*.txt
 !Readme.txt
 !readme.txt
@@ -32,6 +34,7 @@ secrets.*
 credentials.*
 
 # Local schedule data and exports
+examples/generated/
 xlsx_initial/*
 !xlsx_initial/*.bas
 excel_exports/
