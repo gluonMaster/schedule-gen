@@ -64,6 +64,12 @@ path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 The editor also needs generated schedule HTML and state. Starting `gear_xls/server_routes.py` alone does not provide a populated demo. The desktop entry point is `gui.py`; the existing Excel-to-editor pipeline is documented in [PROJECT_MAP.md](PROJECT_MAP.md). Use a separate local test copy when exploring those workflows. The server writes local state, logs and a generated session key; it is intended for a controlled local workflow, and internet deployment has not been reviewed here.
 
+## Continuing development in an existing checkout
+
+Keep existing `config.json`, `gear_xls/config/`, operational workbooks and generated state when updating the source. They are local files, not replacement targets for the public examples. Existing workstation instructions and deployment notes are also excluded from Git.
+
+Commit source changes normally and review `git diff --cached` before pushing. Ignore rules cover local files and outputs; they cannot detect private values pasted into tracked code or documentation. JSON and text data are excluded by default. If a new source file or synthetic test fixture needs one of these formats, add a narrow exception after checking its contents.
+
 ## Source map
 
 | Area | Entry points |
