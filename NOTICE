@@ -1,0 +1,13 @@
+ScheduleGen
+Copyright (c) 2025-2026 Konstantin S. Shakun
+
+Everything in this repository is licensed under the MIT License (see LICENSE),
+except the following VBA modules:
+
+  xlsx_initial/PlanningMacros.bas
+  gear_xls/Modul1.bas
+
+These modules are (c) Kinder- und Elternzentrum Kolibri e.V., Dresden, and were
+developed by Dr. Konstantin S. Shakun. All rights reserved. They are published
+for reference only. Copying, modifying or reusing them requires prior written
+permission from Kinder- und Elternzentrum Kolibri e.V. (info@kolibri-dresden.de).
